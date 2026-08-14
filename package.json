@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-acp",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Standalone Agent Client Protocol (ACP) server for DeepSeek Harness with real-time streaming, thought visibility, tool lifecycle updates, and session recovery.",
   "type": "module",
   "main": "lib/index.js",
@@ -46,6 +46,10 @@
   ],
   "author": "maojindao55 <hobby0524@gmail.com>",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.25.1",
     "@deepseek-ai/cordis": "^4.0.1",
