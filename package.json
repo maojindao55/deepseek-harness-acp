@@ -19,7 +19,11 @@
     "build": "tsc",
     "start": "node lib/bin.js",
     "dev": "tsx src/bin.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "release": "node scripts/release.js",
+    "release:patch": "node scripts/release.js patch",
+    "release:minor": "node scripts/release.js minor",
+    "release:major": "node scripts/release.js major"
   },
   "keywords": [
     "deepseek",
