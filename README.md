@@ -23,10 +23,10 @@
 
 ```bash
 # Install globally via npm
-npm install -g @maojindao55/deepseek-harness-acp
+npm install -g deepseek-harness-acp
 
 # Or run directly via npx
-npx @maojindao55/deepseek-harness-acp
+npx deepseek-harness-acp
 ```
 
 ### 2. Environment Variables

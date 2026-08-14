@@ -23,10 +23,10 @@
 
 ```bash
 # 全局安装
-npm install -g @maojindao55/deepseek-harness-acp
+npm install -g deepseek-harness-acp
 
 # 或直接免安装运行
-npx @maojindao55/deepseek-harness-acp
+npx deepseek-harness-acp
 ```
 
 ### 2. 配置环境变量

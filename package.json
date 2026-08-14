@@ -1,5 +1,5 @@
 {
-  "name": "@maojindao55/deepseek-harness-acp",
+  "name": "deepseek-harness-acp",
   "version": "0.1.0",
   "description": "Standalone Agent Client Protocol (ACP) server for DeepSeek Harness with real-time streaming, thought visibility, tool lifecycle updates, and session recovery.",
   "type": "module",
