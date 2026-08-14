@@ -12,7 +12,7 @@ import { boot, installFailLoud, loadEnv, resolveConfigPath } from '@deepseek-ai/
 
 const NAME = 'deepseek-harness-acp'
 installFailLoud(NAME)
-loadEnv(NAME)
+const env = loadEnv(NAME)
 
 const { values } = parseArgs({
   args: process.argv.slice(2),
@@ -58,4 +58,6 @@ if (typeof values.config === 'string') {
   configToLoad = bundledDefaultConfig
 }
 
-await boot(NAME, configToLoad)
+await boot(NAME, configToLoad, undefined, (ctx) => {
+  ctx.provide('launchEnvironment', env)
+})
