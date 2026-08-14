@@ -127,9 +127,18 @@ async function main() {
   console.log('\n\x1b[1m[4/5] 发布到 npm 官方仓库...\x1b[0m')
   run('npm publish --access public --registry https://registry.npmjs.org/')
 
-  // 7. 成功提示
-  console.log('\n\x1b[1m\x1b[32m🎉 恭喜！v' + newVersion + ' 已成功发布到 npm！\x1b[0m\n')
-  console.log('测试新版本:')
+  // 7. 自动触发国内 npmmirror 同步
+  console.log('\n\x1b[1m[5/5] 触发国内 npmmirror (淘宝源) 自动同步...\x1b[0m')
+  try {
+    run('curl -s -X PUT https://registry-direct.npmmirror.com/deepseek-harness-acp/sync')
+    console.log('\x1b[32m✔ 国内 npmmirror 镜像同步请求已发送！\x1b[0m')
+  } catch {
+    console.warn('\x1b[33m触发 npmmirror 镜像同步失败，通常会在数分钟内自动同步。\x1b[0m')
+  }
+
+  // 8. 成功提示
+  console.log('\n\x1b[1m\x1b[32m🎉 恭喜！v' + newVersion + ' 已成功发布并同步！\x1b[0m\n')
+  console.log('国内/国际安装测试:')
   console.log(`  npx deepseek-harness-acp@${newVersion}\n`)
 }
 

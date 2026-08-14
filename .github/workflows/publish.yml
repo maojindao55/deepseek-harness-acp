@@ -1,4 +1,4 @@
-name: Publish to NPM
+name: Publish to NPM, GitHub Packages, and Sync npmmirror
 
 on:
   release:
@@ -6,14 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-publish:
+  publish-npm:
+    name: Publish to NPM
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -37,3 +37,53 @@ jobs:
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-gpr:
+    name: Publish to GitHub Packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://npm.pkg.github.com'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build project
+        run: pnpm run build
+
+      - name: Publish to GitHub Packages
+        run: |
+          node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json"));
+            pkg.name = "@maojindao55/deepseek-harness-acp";
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
+          '
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sync-npmmirror:
+    name: Sync to Domestic npmmirror
+    needs: [publish-npm]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger npmmirror sync
+        run: |
+          echo "Triggering npmmirror sync for deepseek-harness-acp..."
+          curl -s -X PUT https://registry-direct.npmmirror.com/deepseek-harness-acp/sync || true
+          echo "npmmirror sync triggered successfully!"

@@ -17,6 +17,8 @@
   ],
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
     "start": "node lib/bin.js",
     "dev": "tsx src/bin.ts",
     "test": "vitest run",
@@ -24,6 +26,10 @@
     "release:patch": "node scripts/release.js patch",
     "release:minor": "node scripts/release.js minor",
     "release:major": "node scripts/release.js major"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maojindao55/deepseek-harness-acp.git"
   },
   "keywords": [
     "deepseek",
