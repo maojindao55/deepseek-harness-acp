@@ -1,0 +1,77 @@
+{
+  "name": "@maojindao55/deepseek-harness-acp",
+  "version": "0.1.0",
+  "description": "Standalone Agent Client Protocol (ACP) server for DeepSeek Harness with real-time streaming, thought visibility, tool lifecycle updates, and session recovery.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "bin": {
+    "deepseek-harness-acp": "lib/bin.js",
+    "dsh-acp": "lib/bin.js"
+  },
+  "files": [
+    "lib",
+    "assets",
+    "README.md",
+    "README.zh.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node lib/bin.js",
+    "dev": "tsx src/bin.ts",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "acp",
+    "agent-client-protocol",
+    "ai-agent",
+    "streaming",
+    "reasoning"
+  ],
+  "author": "maojindao55 <hobby0524@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "@agentclientprotocol/sdk": "0.25.1",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/cordis-plugin-include": "^1.0.2",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.2",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@deepseek-ai/dsh-acp": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-acp-demo": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-agent": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-agent-instructions": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-agent-spine-demo": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-app-boot": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-bash-sandbox": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-compaction-basic": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-fs-observation-policy": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-fs-sandbox": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-llm-deepseek": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-sandbox-local": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-sandbox-policy": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-session": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-session-checkpoint-policy": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-session-projection": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-session-query": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-session-query-sqlite": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-subprocess-local": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-token-meter": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-tool-fs": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-tool-todo": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-user-approval": "^0.1.0-rc.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
