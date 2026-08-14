@@ -5,6 +5,10 @@
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
+  "exports": {
+    ".": "./lib/index.js",
+    "./*": "./lib/*.js"
+  },
   "bin": {
     "deepseek-harness-acp": "lib/bin.js",
     "dsh-acp": "lib/bin.js"
