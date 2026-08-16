@@ -1,4 +1,4 @@
-name: Publish Release, GitHub Packages, and Sync npmmirror
+name: Publish Release & Sync npmmirror
 
 on:
   push:
@@ -24,49 +24,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  publish-gpr:
-    name: Publish to GitHub Packages
-    runs-on: ubuntu-latest
-    needs: [create-release]
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          registry-url: 'https://npm.pkg.github.com'
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 10
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build project
-        run: pnpm run build
-
-      - name: Publish to GitHub Packages
-        run: |
-          node -e '
-            const fs = require("fs");
-            const pkg = JSON.parse(fs.readFileSync("package.json"));
-            pkg.name = "@maojindao55/deepseek-harness-acp";
-            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
-          '
-          npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   sync-npmmirror:
     name: Sync to Domestic npmmirror
     runs-on: ubuntu-latest
+    needs: [create-release]
     steps:
       - name: Trigger npmmirror sync
         run: |
