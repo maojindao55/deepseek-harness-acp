@@ -44,6 +44,8 @@ describe('End-to-End ACP Server Process Test', () => {
     const initRes = messages.find((m) => m.id === 1)
     expect(initRes).toBeDefined()
     expect(initRes.result.protocolVersion).toBe(1)
+    expect(initRes.result.agentCapabilities.sessionCapabilities.resume).toBe(true)
+    expect(initRes.result.agentCapabilities.loadSession).toBe(true)
 
     // 2. Send session/new
     const newSessionMsg = JSON.stringify({
@@ -86,6 +88,26 @@ describe('End-to-End ACP Server Process Test', () => {
     expect(configRes).toBeDefined()
     const modelOpt = configRes.result.configOptions.find((o: any) => o.id === 'model')
     expect(modelOpt.currentValue).toBe('deepseek-v4-flash')
+
+    // 4. Send session/resume with a specific sessionId
+    const resumeSessionId = 'e2e-resumed-session-' + Date.now()
+    const resumeMsg = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 4,
+      method: 'session/resume',
+      params: {
+        sessionId: resumeSessionId,
+        cwd: process.cwd(),
+      },
+    }) + '\n'
+    child.stdin.write(resumeMsg)
+
+    await new Promise((r) => setTimeout(r, 1500))
+
+    const resumeRes = messages.find((m) => m.id === 4)
+    expect(resumeRes).toBeDefined()
+    expect(resumeRes.result.sessionId).toBe(resumeSessionId)
+    expect(resumeRes.result.configOptions).toBeDefined()
 
     child.kill('SIGTERM')
   }, 15000)

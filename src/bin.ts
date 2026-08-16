@@ -156,6 +156,186 @@ function augmentPromptResult(parsed: any) {
   }
 }
 
+let cordisCtx: any
+const activeSessionHandles = new Map<string, any>()
+
+function isResumedSession(sessionId: string): boolean {
+  return activeSessionHandles.has(sessionId)
+}
+
+function createUserMessage(text: string) {
+  return {
+    id: `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    role: 'user',
+    content: [{ type: 'text', text }],
+    source: { kind: 'user' },
+  }
+}
+
+function acpPromptToText(prompt: any): string {
+  if (typeof prompt === 'string') return prompt
+  if (Array.isArray(prompt)) {
+    return prompt
+      .map((block: any) => {
+        if (typeof block === 'string') return block
+        if (block?.type === 'text') return block.text || ''
+        if (block?.type === 'resource_link') return block.uri || block.name || ''
+        return ''
+      })
+      .join('\n')
+  }
+  return ''
+}
+
+async function handleSessionResume(msg: any) {
+  const { id, params } = msg
+  const sessionId = params?.sessionId
+  const cwd = params?.cwd || process.cwd()
+  if (!sessionId) {
+    originalStdoutWrite(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32602, message: 'Missing sessionId in params' },
+      }) + '\n'
+    )
+    return
+  }
+
+  const state = getSessionState(sessionId)
+  state.cwd = cwd
+
+  try {
+    let agent = cordisCtx?.agents?.get?.(sessionId)
+    if (!agent && cordisCtx?.agents) {
+      try {
+        const handle = await cordisCtx.agents.resume({
+          resumeSessionId: sessionId,
+          agentOptions: {
+            provider: 'deepseek-official',
+            model: state.model,
+          },
+        })
+        agent = handle?.agent
+        if (handle) activeSessionHandles.set(sessionId, handle)
+      } catch {
+        const handle = await cordisCtx.agents.create({
+          sessionId,
+          meta: { cwd },
+          agentOptions: {
+            provider: 'deepseek-official',
+            model: state.model,
+          },
+        })
+        agent = handle?.agent
+        if (handle) activeSessionHandles.set(sessionId, handle)
+      }
+    }
+
+    originalStdoutWrite(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        result: {
+          sessionId,
+          configOptions: buildConfigOptions(state),
+        },
+      }) + '\n'
+    )
+  } catch (err: any) {
+    originalStdoutWrite(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32603,
+          message: `Failed to resume session: ${err?.message || String(err)}`,
+        },
+      }) + '\n'
+    )
+  }
+}
+
+async function handleSessionPrompt(msg: any) {
+  const { id, params } = msg
+  const sessionId = params?.sessionId
+  const agent = cordisCtx?.agents?.get?.(sessionId)
+
+  if (!agent) {
+    originalStdoutWrite(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32602, message: `unknown session: ${sessionId}` },
+      }) + '\n'
+    )
+    return
+  }
+
+  metricsCollector.startPromptTurn(sessionId)
+
+  const text = acpPromptToText(params.prompt)
+  const message = createUserMessage(text)
+
+  try {
+    agent.followup(message)
+    await agent.whenIdle()
+
+    const { usage, metrics } = metricsCollector.finishPromptTurn(sessionId)
+    originalStdoutWrite(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        result: {
+          stopReason: 'end_turn',
+          usage,
+          _meta: { metrics },
+        },
+      }) + '\n'
+    )
+  } catch (err: any) {
+    originalStdoutWrite(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32603,
+          message: `Prompt turn failed: ${err?.message || String(err)}`,
+        },
+      }) + '\n'
+    )
+  }
+}
+
+function handleIncomingStdinMessage(parsed: any): boolean {
+  if (parsed && parsed.method === 'session/set_config_option') {
+    handleSetConfigOption(parsed)
+    return true
+  }
+  if (parsed && (parsed.method === 'session/resume' || parsed.method === 'session/load')) {
+    handleSessionResume(parsed)
+    return true
+  }
+  if (parsed && parsed.method === 'session/cancel' && parsed.params?.sessionId) {
+    const agent = cordisCtx?.agents?.get?.(parsed.params.sessionId)
+    if (agent) {
+      agent.cancel({ kind: 'user' })
+    }
+  }
+  if (parsed && parsed.method === 'session/prompt' && parsed.params?.sessionId) {
+    const promptSessionId = parsed.params.sessionId
+    if (isResumedSession(promptSessionId)) {
+      handleSessionPrompt(parsed)
+      return true
+    }
+    if (parsed.id !== undefined) {
+      pendingPromptSessions.set(parsed.id, promptSessionId)
+    }
+    metricsCollector.startPromptTurn(promptSessionId)
+  }
+  return false
+}
+
 function wrapStdinWebStream(webStdin: any): any {
   const textDecoder = new TextDecoder()
   const textEncoder = new TextEncoder()
@@ -171,16 +351,8 @@ function wrapStdinWebStream(webStdin: any): any {
             if (buffer.trim()) {
               try {
                 const parsed = JSON.parse(buffer.trim())
-                if (parsed && parsed.method === 'session/set_config_option') {
-                  handleSetConfigOption(parsed)
+                if (handleIncomingStdinMessage(parsed)) {
                   break
-                }
-                if (parsed && parsed.method === 'session/prompt' && parsed.params?.sessionId) {
-                  const promptSessionId = parsed.params.sessionId
-                  if (parsed.id !== undefined) {
-                    pendingPromptSessions.set(parsed.id, promptSessionId)
-                  }
-                  metricsCollector.startPromptTurn(promptSessionId)
                 }
               } catch {}
               controller.enqueue(textEncoder.encode(buffer))
@@ -197,16 +369,8 @@ function wrapStdinWebStream(webStdin: any): any {
             if (!trimmed) continue
             try {
               const parsed = JSON.parse(trimmed)
-              if (parsed && parsed.method === 'session/set_config_option') {
-                handleSetConfigOption(parsed)
+              if (handleIncomingStdinMessage(parsed)) {
                 continue
-              }
-              if (parsed && parsed.method === 'session/prompt' && parsed.params?.sessionId) {
-                const promptSessionId = parsed.params.sessionId
-                if (parsed.id !== undefined) {
-                  pendingPromptSessions.set(parsed.id, promptSessionId)
-                }
-                metricsCollector.startPromptTurn(promptSessionId)
               }
             } catch {}
             controller.enqueue(textEncoder.encode(line + '\n'))
@@ -242,6 +406,18 @@ function wrapStdoutWebStream(webStdout: any): any {
         }
         try {
           const parsed = JSON.parse(trimmed)
+          if (parsed?.result?.agentCapabilities) {
+            parsed.result.agentCapabilities = {
+              ...parsed.result.agentCapabilities,
+              sessionCapabilities: {
+                resume: true,
+                list: true,
+              },
+              loadSession: true,
+            }
+            await writer.write(textEncoder.encode(JSON.stringify(parsed) + '\n'))
+            continue
+          }
           if (parsed?.result?.sessionId) {
             const state = getSessionState(parsed.result.sessionId)
             parsed.result.configOptions = buildConfigOptions(state)
@@ -327,6 +503,7 @@ if (typeof values.config === 'string') {
 }
 
 await boot(NAME, configToLoad, undefined, (ctx: any) => {
+  cordisCtx = ctx
   ctx.provide('launchEnvironment', env)
 
   ctx.on('session/event', (session: any, event: any) => {
