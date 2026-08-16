@@ -1,8 +1,13 @@
 # DeepSeek Harness ACP 协议独立服务
 
+[![npm version](https://img.shields.io/npm/v/deepseek-harness-acp.svg?color=blue)](https://www.npmjs.com/package/deepseek-harness-acp)
+[![npm downloads](https://img.shields.io/npm/dm/deepseek-harness-acp.svg)](https://www.npmjs.com/package/deepseek-harness-acp)
+[![license](https://img.shields.io/npm/l/deepseek-harness-acp.svg)](LICENSE)
+
 > 基于 DeepSeek Harness 构建的轻量级独立 Agent Client Protocol (ACP) 服务端。支持实时 Token 打字机流、深度思考链流式输出、工具执行生命周期卡片、跨进程历史会话恢复与动态模型切换。
 
 [English](README.md)
+
 
 ---
 

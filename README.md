@@ -1,8 +1,13 @@
 # DeepSeek Harness ACP Server (Standalone)
 
+[![npm version](https://img.shields.io/npm/v/deepseek-harness-acp.svg?color=blue)](https://www.npmjs.com/package/deepseek-harness-acp)
+[![npm downloads](https://img.shields.io/npm/dm/deepseek-harness-acp.svg)](https://www.npmjs.com/package/deepseek-harness-acp)
+[![license](https://img.shields.io/npm/l/deepseek-harness-acp.svg)](LICENSE)
+
 > Standalone Agent Client Protocol (ACP) Server powered by DeepSeek Harness with real-time token streaming, thought trace transparency, tool execution lifecycle updates, and cross-process session recovery.
 
 [中文文档](README.zh.md)
+
 
 ---
 
