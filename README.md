@@ -12,7 +12,9 @@
 - **🧠 Thought Trace Streaming**: Live reasoning and thinking flow (`agent_thought_chunk`).
 - **📊 Comprehensive Token & Performance Metrics**: Standard `usage` (input/output/cached/thought tokens) and detailed `_meta.metrics` (TTFT, tok/s, cache hit rate, turns, steps) in `session/prompt` response.
 - **🛠️ Tool Lifecycle Updates**: Observable tool execution states (`tool_call` & `tool_call_update`).
+- **🧩 MCP (Model Context Protocol) Support**: Connect to external Stdio / SSE MCP servers, auto-discovering project `.mcp.json` / `.cursor/mcp.json` / `.vscode/mcp.json` and ACP session parameters to seamlessly expand the agent's tool ecosystem.
 - **🔄 Session Recovery & Listing**: Seamless multi-turn session resume (`session/load`, `session/resume`, `session/list`).
+
 - **⚙️ Dynamic Configuration**: Real-time model switching (`deepseek-v4-pro` / `deepseek-v4-flash`).
 - **📦 Zero-Config Startup**: Built-in default configuration — start immediately with only `DEEPSEEK_API_KEY`.
 
@@ -112,6 +114,42 @@ await client.prompt({
 ```
 
 ---
+
+## 🧩 MCP (Model Context Protocol) Configuration
+
+`deepseek-harness-acp` natively operates as an **MCP Client**, connecting to external MCP servers and exposing their tools directly to the DeepSeek agent:
+
+### 1. Workspace Configuration Discovery
+
+Create a `.mcp.json` (or `.cursor/mcp.json` / `.vscode/mcp.json`) in your project root:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."
+      }
+    },
+    "fetch": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"]
+    },
+    "remote-sse": {
+      "url": "http://localhost:8080/sse"
+    }
+  }
+}
+```
+
+### 2. Dynamic ACP Session Parameters
+
+When an editor client requests `session/new` or `session/resume`, specify the `mcpServers` list in the parameters. The server will dynamically connect and register the tools into DeepSeek's decision context.
+
+---
+
 
 ## 📜 Supported ACP Methods
 

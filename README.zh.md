@@ -12,7 +12,9 @@
 - **🧠 思考链 / 深度思考流**：实时查看模型推理思考过程（`agent_thought_chunk`）。
 - **📊 完整用量与性能指标**：`session/prompt` 响应返回标准 `usage`（输入/输出/Cache命中/思考Token）与 `_meta.metrics`（轮步数、TTFT首字延迟、tok/s生成速度、缓存命中率）。
 - **🛠️ 工具执行生命周期**：完整的工具调用中与完成状态更新（`tool_call` & `tool_call_update`）。
+- **🧩 MCP (Model Context Protocol) 扩展**：支持 Stdio / SSE 外部 MCP 服务，自动发现项目 `.mcp.json` / `.cursor/mcp.json` / `.vscode/mcp.json` 与 ACP 会话参数，无缝扩充 Agent 工具生态。
 - **🔄 跨进程会话恢复与列表**：支持多轮对话接续与历史会话读取（`session/load`、`session/resume`、`session/list`）。
+
 - **⚙️ 动态配置项**：支持客户端动态切换模型（`deepseek-v4-pro` / `deepseek-v4-flash`）。
 - **📦 零配置开箱即用**：内置默认沙箱与智能体配置，只需配置 `DEEPSEEK_API_KEY` 即可一行命令启动。
 
@@ -112,6 +114,42 @@ await client.prompt({
 ```
 
 ---
+
+## 🧩 MCP (Model Context Protocol) 配置指南
+
+`deepseek-harness-acp` 原生支持作为 **MCP Client** 连接外部 MCP 服务器并将其提供的工具注册给 DeepSeek 智能体：
+
+### 1. 工作区配置文件自动加载
+
+在项目工作区根目录下创建 `.mcp.json`（或 `.cursor/mcp.json` / `.vscode/mcp.json`）：
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."
+      }
+    },
+    "fetch": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"]
+    },
+    "remote-sse": {
+      "url": "http://localhost:8080/sse"
+    }
+  }
+}
+```
+
+### 2. ACP 会话参数动态传入
+
+当编辑器发起 `session/new` 或 `session/resume` 请求时，在参数中携带 `mcpServers` 列表，服务会自动连接并将工具注入 DeepSeek 的决策上下文中。
+
+---
+
 
 ## 📜 协议方法清单
 

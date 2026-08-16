@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-acp",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Standalone Agent Client Protocol (ACP) server for DeepSeek Harness with real-time streaming, thought visibility, tool lifecycle updates, and session recovery.",
   "type": "module",
   "main": "lib/index.js",
@@ -54,7 +54,6 @@
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/cordis-plugin-include": "^1.0.2",
     "@deepseek-ai/cordis-plugin-loader": "^1.0.2",
-    "@deepseek-ai/schemastery": "^3.18.1",
     "@deepseek-ai/dsh-acp": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-acp-demo": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-agent": "^0.1.0-rc.5",
@@ -85,7 +84,9 @@
     "@deepseek-ai/dsh-tool-fs": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-tool-todo": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.5",
-    "@deepseek-ai/dsh-user-approval": "^0.1.0-rc.5"
+    "@deepseek-ai/dsh-user-approval": "^0.1.0-rc.5",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

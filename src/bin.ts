@@ -13,6 +13,8 @@ import { Readable, Writable } from 'node:stream'
 import { boot, installFailLoud, loadEnv, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import { buildConfigOptions, DEFAULT_EFFORT, DEFAULT_MODEL, SessionState } from './models.js'
 import { metricsCollector } from './metrics.js'
+import { mcpManager } from './mcp/index.js'
+
 
 const NAME = 'deepseek-harness-acp'
 const currentDir = dirname(fileURLToPath(import.meta.url))
@@ -180,12 +182,14 @@ function acpPromptToText(prompt: any): string {
         if (typeof block === 'string') return block
         if (block?.type === 'text') return block.text || ''
         if (block?.type === 'resource_link') return block.uri || block.name || ''
+        if (block?.type === 'image') return '[Image attachment]'
         return ''
       })
       .join('\n')
   }
   return ''
 }
+
 
 async function handleSessionResume(msg: any) {
   const { id, params } = msg
@@ -330,10 +334,18 @@ async function handleSessionList(msg: any) {
 }
 
 function handleIncomingStdinMessage(parsed: any): boolean {
+  if (parsed && (parsed.method === 'session/new' || parsed.method === 'session/resume' || parsed.method === 'session/load')) {
+    if (parsed.params) {
+      mcpManager.handleSessionMcp(parsed.params).catch((err) => {
+        console.error('[MCP] Failed to handle session MCP configuration:', err?.message || String(err))
+      })
+    }
+  }
   if (parsed && parsed.method === 'session/set_config_option') {
     handleSetConfigOption(parsed)
     return true
   }
+
   if (parsed && (parsed.method === 'session/resume' || parsed.method === 'session/load')) {
     handleSessionResume(parsed)
     return true
@@ -398,9 +410,21 @@ function wrapStdinWebStream(webStdin: any): any {
               if (handleIncomingStdinMessage(parsed)) {
                 continue
               }
+              if (parsed && parsed.method === 'session/new' && parsed.params?.mcpServers?.length) {
+                const sanitized = {
+                  ...parsed,
+                  params: {
+                    ...parsed.params,
+                    mcpServers: [],
+                  },
+                }
+                controller.enqueue(textEncoder.encode(JSON.stringify(sanitized) + '\n'))
+                continue
+              }
             } catch {}
             controller.enqueue(textEncoder.encode(line + '\n'))
           }
+
         }
       } catch (err) {
         controller.error(err)
@@ -440,10 +464,16 @@ function wrapStdoutWebStream(webStdout: any): any {
                 list: true,
               },
               loadSession: true,
+              mcpCapabilities: {
+                stdio: true,
+                sse: true,
+                http: true,
+              },
             }
             await writer.write(textEncoder.encode(JSON.stringify(parsed) + '\n'))
             continue
           }
+
           if (parsed?.result?.sessionId) {
             const state = getSessionState(parsed.result.sessionId)
             parsed.result.configOptions = buildConfigOptions(state)
@@ -686,4 +716,24 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
       ...(state.effort ? { reasoningEffort: state.effort } : {}),
     }
   })
+
+  ctx.inject(['tools'], (toolsCtx: any) => {
+    mcpManager.setToolsService(toolsCtx.tools)
+    mcpManager.loadWorkspaceMcp(process.cwd()).catch(() => {})
+  })
 })
+
+const handleExit = async () => {
+  await mcpManager.closeAll()
+}
+
+process.on('SIGINT', async () => {
+  await handleExit()
+  process.exit(0)
+})
+
+process.on('SIGTERM', async () => {
+  await handleExit()
+  process.exit(0)
+})
+
