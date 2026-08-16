@@ -70,10 +70,64 @@ function checkNpmAuth() {
   }
 }
 
+function checkGitStatus() {
+  try {
+    const status = execSync('git status --porcelain', {
+      cwd: rootDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+    }).trim()
+    return status
+  } catch {
+    return null
+  }
+}
+
+function getCurrentBranch() {
+  try {
+    return execSync('git rev-parse --abbrev-ref HEAD', {
+      cwd: rootDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+    }).trim()
+  } catch {
+    return 'unknown'
+  }
+}
+
 async function main() {
   console.log('\n\x1b[1m\x1b[35m🚀 deepseek-harness-acp 一键发布助手\x1b[0m\n')
 
-  // 0. 前置校验 npm 登录状态
+  // 0.1 检查 Git 工作区是否干净（防止 git 与 npm 版本不一致）
+  const gitStatus = checkGitStatus()
+  if (gitStatus) {
+    console.error('\x1b[31m✖ 发布前检查失败: Git 工作区存在未提交的修改！\x1b[0m')
+    console.error('未提交的文件列表:\n')
+    console.error(
+      gitStatus
+        .split('\n')
+        .map((l) => `  \x1b[33m${l}\x1b[0m`)
+        .join('\n')
+    )
+    console.error(
+      '\n为了保证 Git 提交记录与 npm 发布产物严格一致，请先提交 (git commit) 或清理 (git stash) 后再发布！\n'
+    )
+    process.exit(1)
+  }
+
+  // 0.2 检查 Git 当前分支
+  const currentBranch = getCurrentBranch()
+  if (currentBranch !== 'main' && currentBranch !== 'master') {
+    const branchConfirm = await prompt(
+      `当前处于分支 [\x1b[33m${currentBranch}\x1b[0m]，非主分支，是否确认继续发布？(y/N): `
+    )
+    if (branchConfirm.toLowerCase() !== 'y') {
+      console.log('\x1b[31m发布已取消。\x1b[0m')
+      process.exit(0)
+    }
+  }
+
+  // 0.3 前置校验 npm 登录状态
   const npmUser = checkNpmAuth()
   if (!npmUser) {
     console.error('\x1b[31m✖ 发布前检查失败: 您尚未登录 npm 官方源！\x1b[0m')
@@ -82,6 +136,11 @@ async function main() {
     process.exit(1)
   }
   console.log(`npm 鉴权账号: \x1b[36m${npmUser}\x1b[0m`)
+
+  // 0.4 前置执行自动化测试
+  console.log('\n\x1b[1m➜ 执行自动化测试套件 (npm test)...\x1b[0m')
+  run('npm test')
+  console.log('\x1b[32m✔ 自动化测试全部通过！\x1b[0m\n')
 
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
   const currentVersion = pkg.version
