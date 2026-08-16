@@ -10,6 +10,7 @@
 
 - **⚡ Real-time Token Streaming**: Word-by-word streaming (`agent_message_chunk`) for ultra-low latency.
 - **🧠 Thought Trace Streaming**: Live reasoning and thinking flow (`agent_thought_chunk`).
+- **📊 Comprehensive Token & Performance Metrics**: Standard `usage` (input/output/cached/thought tokens) and detailed `_meta.metrics` (TTFT, tok/s, cache hit rate, turns, steps) in `session/prompt` response.
 - **🛠️ Tool Lifecycle Updates**: Observable tool execution states (`tool_call` & `tool_call_update`).
 - **🔄 Session Recovery & Listing**: Seamless multi-turn session resume (`session/load`, `session/resume`, `session/list`).
 - **⚙️ Dynamic Configuration**: Real-time model switching (`deepseek-v4-pro` / `deepseek-v4-flash`).

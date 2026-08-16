@@ -4,5 +4,7 @@
  */
 
 export * from './models.js'
+export * from './metrics.js'
 export * from '@deepseek-ai/dsh-acp'
 export { boot } from '@deepseek-ai/dsh-app-boot'
+

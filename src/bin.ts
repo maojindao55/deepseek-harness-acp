@@ -12,6 +12,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { Readable, Writable } from 'node:stream'
 import { boot, installFailLoud, loadEnv, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import { buildConfigOptions, DEFAULT_EFFORT, DEFAULT_MODEL, SessionState } from './models.js'
+import { metricsCollector } from './metrics.js'
 
 const NAME = 'deepseek-harness-acp'
 const currentDir = dirname(fileURLToPath(import.meta.url))
@@ -69,6 +70,7 @@ Environment Variables:
 // Session state management
 const sessionStates = new Map<string, SessionState>()
 let latestState: SessionState | undefined
+const pendingPromptSessions = new Map<string | number, string>()
 
 function getSessionState(sessionId?: string): SessionState {
   if (sessionId && sessionStates.has(sessionId)) {
@@ -136,6 +138,24 @@ function handleSetConfigOption(msg: any) {
   }
 }
 
+function augmentPromptResult(parsed: any) {
+  if (parsed?.result && parsed.result.stopReason) {
+    const sessionId =
+      (parsed.id !== undefined ? pendingPromptSessions.get(parsed.id) : undefined) ||
+      latestState?.sessionId ||
+      'default'
+    if (parsed.id !== undefined) {
+      pendingPromptSessions.delete(parsed.id)
+    }
+    const { usage, metrics } = metricsCollector.finishPromptTurn(sessionId)
+    parsed.result.usage = usage
+    parsed.result._meta = {
+      ...(parsed.result._meta ?? {}),
+      metrics,
+    }
+  }
+}
+
 function wrapStdinWebStream(webStdin: any): any {
   const textDecoder = new TextDecoder()
   const textEncoder = new TextEncoder()
@@ -155,6 +175,13 @@ function wrapStdinWebStream(webStdin: any): any {
                   handleSetConfigOption(parsed)
                   break
                 }
+                if (parsed && parsed.method === 'session/prompt' && parsed.params?.sessionId) {
+                  const promptSessionId = parsed.params.sessionId
+                  if (parsed.id !== undefined) {
+                    pendingPromptSessions.set(parsed.id, promptSessionId)
+                  }
+                  metricsCollector.startPromptTurn(promptSessionId)
+                }
               } catch {}
               controller.enqueue(textEncoder.encode(buffer))
             }
@@ -173,6 +200,13 @@ function wrapStdinWebStream(webStdin: any): any {
               if (parsed && parsed.method === 'session/set_config_option') {
                 handleSetConfigOption(parsed)
                 continue
+              }
+              if (parsed && parsed.method === 'session/prompt' && parsed.params?.sessionId) {
+                const promptSessionId = parsed.params.sessionId
+                if (parsed.id !== undefined) {
+                  pendingPromptSessions.set(parsed.id, promptSessionId)
+                }
+                metricsCollector.startPromptTurn(promptSessionId)
               }
             } catch {}
             controller.enqueue(textEncoder.encode(line + '\n'))
@@ -214,6 +248,18 @@ function wrapStdoutWebStream(webStdout: any): any {
             await writer.write(textEncoder.encode(JSON.stringify(parsed) + '\n'))
             continue
           }
+          if (parsed?.result?.stopReason) {
+            augmentPromptResult(parsed)
+            await writer.write(textEncoder.encode(JSON.stringify(parsed) + '\n'))
+            continue
+          }
+          if (
+            parsed?.method === 'session/update' &&
+            parsed.params?.update?.sessionUpdate === 'agent_message_chunk'
+          ) {
+            // Suppress stock whole-message batch chunks to prevent duplicate text
+            continue
+          }
         } catch {}
         await writer.write(textEncoder.encode(line + '\n'))
       }
@@ -226,6 +272,14 @@ function wrapStdoutWebStream(webStdout: any): any {
             const state = getSessionState(parsed.result.sessionId)
             parsed.result.configOptions = buildConfigOptions(state)
             await writer.write(textEncoder.encode(JSON.stringify(parsed) + '\n'))
+          } else if (parsed?.result?.stopReason) {
+            augmentPromptResult(parsed)
+            await writer.write(textEncoder.encode(JSON.stringify(parsed) + '\n'))
+          } else if (
+            parsed?.method === 'session/update' &&
+            parsed.params?.update?.sessionUpdate === 'agent_message_chunk'
+          ) {
+            // Suppress stock whole-message batch chunks
           } else {
             await writer.write(textEncoder.encode(buffer))
           }
@@ -274,6 +328,139 @@ if (typeof values.config === 'string') {
 
 await boot(NAME, configToLoad, undefined, (ctx: any) => {
   ctx.provide('launchEnvironment', env)
+
+  ctx.on('session/event', (session: any, event: any) => {
+    const sessionId = session?.header?.id || session?.id || latestState?.sessionId
+    if (sessionId) {
+      metricsCollector.recordEvent(sessionId, event)
+    }
+
+    if (!sessionId) return
+
+    // 1. Live stream text & reasoning chunks
+    if (event.type === 'assistant/chunk') {
+      const chunk = event.data?.chunk
+      if (!chunk) return
+
+      if (
+        chunk.type === 'reasoning-delta' ||
+        chunk.reasoning ||
+        (chunk.type === 'thinking' && chunk.text)
+      ) {
+        const text = chunk.text || chunk.reasoning || chunk.content || ''
+        if (text) {
+          originalStdoutWrite(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'session/update',
+              params: {
+                sessionId,
+                update: {
+                  sessionUpdate: 'agent_thought_chunk',
+                  content: { type: 'text', text },
+                },
+              },
+            }) + '\n'
+          )
+        }
+      } else if (
+        chunk.type === 'text-delta' ||
+        chunk.text ||
+        (chunk.type === 'content' && chunk.text)
+      ) {
+        const text = chunk.text || chunk.content || ''
+        if (text) {
+          originalStdoutWrite(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'session/update',
+              params: {
+                sessionId,
+                update: {
+                  sessionUpdate: 'agent_message_chunk',
+                  content: { type: 'text', text },
+                },
+              },
+            }) + '\n'
+          )
+        }
+      }
+    }
+
+    // 2. Tool calls
+    if (event.type === 'tool/call') {
+      const callData = event.data
+      const toolCallId = callData?.callId || callData?.id || `call_${Date.now()}`
+      const toolName = callData?.name || callData?.tool || 'tool'
+      const rawInput =
+        typeof callData?.arguments === 'string'
+          ? (() => {
+              try {
+                return JSON.parse(callData.arguments)
+              } catch {
+                return { input: callData.arguments }
+              }
+            })()
+          : callData?.arguments || {}
+
+      originalStdoutWrite(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'session/update',
+          params: {
+            sessionId,
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId,
+              title: toolName,
+              rawInput,
+              status: 'in_progress',
+            },
+          },
+        }) + '\n'
+      )
+    }
+
+    // 3. Tool results
+    if (event.type === 'tool/result') {
+      const resultData = event.data
+      const message = resultData?.message
+      const toolCallId = message?.callId || resultData?.callId || resultData?.id
+      const isError = Boolean(message?.isError || resultData?.error || resultData?.isError)
+
+      let rawOutput: any = ''
+      let outputText = ''
+      if (Array.isArray(message?.content)) {
+        outputText = message.content
+          .map((b: any) => (b.type === 'text' ? b.text : JSON.stringify(b)))
+          .join('\n')
+        rawOutput = outputText
+      } else if (resultData?.output !== undefined) {
+        rawOutput = resultData.output
+        outputText = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput)
+      } else if (resultData?.error) {
+        rawOutput = resultData.error
+        outputText = String(resultData.error.message || resultData.error)
+      }
+
+      originalStdoutWrite(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'session/update',
+          params: {
+            sessionId,
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId,
+              status: isError ? 'failed' : 'completed',
+              rawOutput,
+              content: [{ type: 'text', text: outputText }],
+            },
+          },
+        }) + '\n'
+      )
+    }
+  })
 
   ctx.on('system-prompt/assemble', async (assembly: any, context: any, next: any) => {
     const assembled = await (typeof next === 'function' ? next() : assembly)

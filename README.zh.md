@@ -10,6 +10,7 @@
 
 - **⚡ 实时打字机 Token 流**：逐字返回（`agent_message_chunk`），极致响应体验。
 - **🧠 思考链 / 深度思考流**：实时查看模型推理思考过程（`agent_thought_chunk`）。
+- **📊 完整用量与性能指标**：`session/prompt` 响应返回标准 `usage`（输入/输出/Cache命中/思考Token）与 `_meta.metrics`（轮步数、TTFT首字延迟、tok/s生成速度、缓存命中率）。
 - **🛠️ 工具执行生命周期**：完整的工具调用中与完成状态更新（`tool_call` & `tool_call_update`）。
 - **🔄 跨进程会话恢复与列表**：支持多轮对话接续与历史会话读取（`session/load`、`session/resume`、`session/list`）。
 - **⚙️ 动态配置项**：支持客户端动态切换模型（`deepseek-v4-pro` / `deepseek-v4-flash`）。
