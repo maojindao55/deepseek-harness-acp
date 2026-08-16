@@ -186,11 +186,11 @@ async function main() {
   // 4. Git Commit & Tag
   console.log('\n\x1b[1m[3/5] 提交 Git 变更并打 Tag...\x1b[0m')
   try {
-    run('git add package.json lib/ assets/')
+    run('git add package.json assets/')
     run(`git commit -m "chore(release): v${newVersion}"`)
     run(`git tag -a v${newVersion} -m "Release v${newVersion}"`)
   } catch (err) {
-    console.warn('\x1b[33mGit 提交或 Tag 存在警告，继续后续流程...\x1b[0m')
+    console.error('\x1b[31mGit 提交或 Tag 失败:\x1b[0m', err?.message || String(err))
   }
 
   // 5. 推送 Git (可选)
@@ -199,10 +199,11 @@ async function main() {
     try {
       run('git push')
       run('git push --tags')
-    } catch {
-      console.warn('\x1b[33mGit push 失败（可能未配置 remote），已跳过。\x1b[0m')
+    } catch (err) {
+      console.warn('\x1b[33mGit push 失败（可能未配置 remote），已跳过:\x1b[0m', err?.message || String(err))
     }
   }
+
 
   // 6. 发布到 npm (支持双包名发布: deepseek-harness-acp 和 dsh-acp)
   console.log('\n\x1b[1m[4/5] 发布到 npm 官方仓库 (双包名: deepseek-harness-acp, dsh-acp)...\x1b[0m')
