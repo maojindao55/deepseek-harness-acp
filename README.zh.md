@@ -22,10 +22,14 @@
 ### 1. 全局安装（CLI）
 
 ```bash
-# 全局安装
+# 全局安装（支持全称或短别名）
 npm install -g deepseek-harness-acp
+# 或
+npm install -g dsh-acp
 
-# 或直接免安装运行
+# 或直接免安装秒级运行
+npx dsh-acp
+# 或
 npx deepseek-harness-acp
 ```
 

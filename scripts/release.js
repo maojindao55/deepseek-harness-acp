@@ -58,12 +58,34 @@ function getNextVersion(current, type) {
   }
 }
 
+function checkNpmAuth() {
+  try {
+    const user = execSync('npm whoami --registry https://registry.npmjs.org/', {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+    }).trim()
+    return user
+  } catch {
+    return null
+  }
+}
+
 async function main() {
   console.log('\n\x1b[1m\x1b[35m🚀 deepseek-harness-acp 一键发布助手\x1b[0m\n')
 
+  // 0. 前置校验 npm 登录状态
+  const npmUser = checkNpmAuth()
+  if (!npmUser) {
+    console.error('\x1b[31m✖ 发布前检查失败: 您尚未登录 npm 官方源！\x1b[0m')
+    console.error('为了避免发布中断并产生脏 Git 提交/Tag，请先在终端执行登录：\n')
+    console.error('  \x1b[36m➜ npm login --registry https://registry.npmjs.org/\x1b[0m\n')
+    process.exit(1)
+  }
+  console.log(`npm 鉴权账号: \x1b[36m${npmUser}\x1b[0m`)
+
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
   const currentVersion = pkg.version
-  console.log(`当前版本: \x1b[32mv${currentVersion}\x1b[0m\n`)
+  console.log(`当前项目版本: \x1b[32mv${currentVersion}\x1b[0m\n`)
 
   // 1. 确定新版本号
   let releaseType = process.argv[2]
@@ -123,23 +145,74 @@ async function main() {
     }
   }
 
-  // 6. 发布到 npm
-  console.log('\n\x1b[1m[4/5] 发布到 npm 官方仓库...\x1b[0m')
-  run('npm publish --access public --registry https://registry.npmjs.org/')
+  // 6. 发布到 npm (支持双包名发布: deepseek-harness-acp 和 dsh-acp)
+  console.log('\n\x1b[1m[4/5] 发布到 npm 官方仓库 (双包名: deepseek-harness-acp, dsh-acp)...\x1b[0m')
+  const publishPackages = ['deepseek-harness-acp', 'dsh-acp']
+  const publishResults = []
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  try {
+    for (let i = 0; i < publishPackages.length; i++) {
+      const name = publishPackages[i]
+      if (i > 0) {
+        console.log('\n⏳ 等待 npm 官方 Registry 缓存就绪 (2 秒)...')
+        await sleep(2000)
+      }
+
+      console.log(`\n\x1b[36m📦 正在发布包: ${name}@${newVersion} ...\x1b[0m`)
+      pkg.name = name
+      writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
+
+      let published = false
+      let lastError = null
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          run('npm publish --access public --registry https://registry.npmjs.org/')
+          published = true
+          publishResults.push({ name, success: true })
+          console.log(`\x1b[32m✔ ${name}@${newVersion} 发布成功！\x1b[0m`)
+          break
+        } catch (err) {
+          lastError = err
+          if (attempt === 1) {
+            console.warn(`\x1b[33m首次发布 ${name} 遇到抖动，等待 3 秒后重试...\x1b[0m`)
+            await sleep(3000)
+          }
+        }
+      }
+
+      if (!published) {
+        publishResults.push({ name, success: false, error: lastError?.message })
+        console.error(`\x1b[31m✖ ${name}@${newVersion} 发布失败\x1b[0m`)
+      }
+    }
+  } finally {
+    // 恢复主包名
+    pkg.name = 'deepseek-harness-acp'
+    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
+  }
 
   // 7. 自动触发国内 npmmirror 同步
   console.log('\n\x1b[1m[5/5] 触发国内 npmmirror (淘宝源) 自动同步...\x1b[0m')
-  try {
-    run('curl -s -X PUT https://registry-direct.npmmirror.com/deepseek-harness-acp/sync')
-    console.log('\x1b[32m✔ 国内 npmmirror 镜像同步请求已发送！\x1b[0m')
-  } catch {
-    console.warn('\x1b[33m触发 npmmirror 镜像同步失败，通常会在数分钟内自动同步。\x1b[0m')
+  for (const name of publishPackages) {
+    try {
+      run(`curl -s -X PUT https://registry-direct.npmmirror.com/${name}/sync`)
+      console.log(`\x1b[32m✔ 国内 npmmirror 镜像 [${name}] 同步请求已发送！\x1b[0m`)
+    } catch {
+      console.warn(`\x1b[33m触发 [${name}] npmmirror 镜像同步失败，通常会在数分钟内自动同步。\x1b[0m`)
+    }
   }
 
   // 8. 成功提示
-  console.log('\n\x1b[1m\x1b[32m🎉 恭喜！v' + newVersion + ' 已成功发布并同步！\x1b[0m\n')
-  console.log('国内/国际安装测试:')
-  console.log(`  npx deepseek-harness-acp@${newVersion}\n`)
+  console.log('\n\x1b[1m\x1b[32m🎉 发布流程结束！\x1b[0m\n')
+  console.log('发布结果摘要:')
+  for (const res of publishResults) {
+    console.log(`  - \x1b[1m${res.name}\x1b[0m: ${res.success ? '\x1b[32m发布成功 ✔\x1b[0m' : '\x1b[31m发布失败 ✖\x1b[0m'}`)
+  }
+  console.log('\n国内/国际安装测试:')
+  console.log(`  npx deepseek-harness-acp@${newVersion}`)
+  console.log(`  npx dsh-acp@${newVersion}\n`)
 }
 
 main().catch((err) => {

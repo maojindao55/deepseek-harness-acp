@@ -22,10 +22,14 @@
 ### 1. Global Installation (CLI)
 
 ```bash
-# Install globally via npm
+# Install globally via npm (using full name or short alias)
 npm install -g deepseek-harness-acp
+# or
+npm install -g dsh-acp
 
-# Or run directly via npx
+# Or run directly via npx without installation
+npx dsh-acp
+# or
 npx deepseek-harness-acp
 ```
 
