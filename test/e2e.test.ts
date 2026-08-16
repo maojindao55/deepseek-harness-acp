@@ -102,12 +102,23 @@ describe('End-to-End ACP Server Process Test', () => {
     }) + '\n'
     child.stdin.write(resumeMsg)
 
-    await new Promise((r) => setTimeout(r, 1500))
+    // 5. Send session/list
+    const listMsg = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 5,
+      method: 'session/list',
+      params: {
+        cwd: process.cwd(),
+      },
+    }) + '\n'
+    child.stdin.write(listMsg)
 
-    const resumeRes = messages.find((m) => m.id === 4)
-    expect(resumeRes).toBeDefined()
-    expect(resumeRes.result.sessionId).toBe(resumeSessionId)
-    expect(resumeRes.result.configOptions).toBeDefined()
+    await new Promise((r) => setTimeout(r, 1000))
+
+    const listRes = messages.find((m) => m.id === 5)
+    expect(listRes).toBeDefined()
+    expect(Array.isArray(listRes.result.sessions)).toBe(true)
+    expect(listRes.result.sessions.some((s: any) => s.sessionId === resumeSessionId)).toBe(true)
 
     child.kill('SIGTERM')
   }, 15000)

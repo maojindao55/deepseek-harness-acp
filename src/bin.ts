@@ -307,6 +307,28 @@ async function handleSessionPrompt(msg: any) {
   }
 }
 
+async function handleSessionList(msg: any) {
+  const { id, params } = msg
+  const cwd = params?.cwd
+  const sessions: Array<{ sessionId: string; cwd?: string }> = []
+
+  for (const [sessionId, state] of sessionStates.entries()) {
+    if (!cwd || state.cwd === cwd) {
+      sessions.push({ sessionId, cwd: state.cwd })
+    }
+  }
+
+  originalStdoutWrite(
+    JSON.stringify({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        sessions,
+      },
+    }) + '\n'
+  )
+}
+
 function handleIncomingStdinMessage(parsed: any): boolean {
   if (parsed && parsed.method === 'session/set_config_option') {
     handleSetConfigOption(parsed)
@@ -314,6 +336,10 @@ function handleIncomingStdinMessage(parsed: any): boolean {
   }
   if (parsed && (parsed.method === 'session/resume' || parsed.method === 'session/load')) {
     handleSessionResume(parsed)
+    return true
+  }
+  if (parsed && parsed.method === 'session/list') {
+    handleSessionList(parsed)
     return true
   }
   if (parsed && parsed.method === 'session/cancel' && parsed.params?.sessionId) {
