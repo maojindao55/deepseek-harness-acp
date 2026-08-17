@@ -15,8 +15,6 @@ export const DEFAULT_EFFORT = 'max'
 export const SUPPORTED_MODELS: ModelOption[] = [
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', contextWindow: 128_000 },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', contextWindow: 128_000 },
-  { id: 'deepseek-chat', name: 'DeepSeek Chat (V3)', contextWindow: 64_000 },
-  { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner (R1)', contextWindow: 64_000 },
 ]
 
 export function getEffectiveSupportedModels(currentModel?: string): ModelOption[] {
