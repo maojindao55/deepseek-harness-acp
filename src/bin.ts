@@ -114,6 +114,11 @@ function handleSetConfigOption(msg: any) {
     const state = getSessionState(sessionId)
     if (configId === 'model' && typeof value === 'string') {
       state.model = value
+      const agent = cordisCtx?.agents?.get?.(sessionId)
+      if (agent) {
+        if (agent.options) agent.options.model = value
+        if (agent.session?.options) agent.session.options.model = value
+      }
     } else if (configId === 'effort' && typeof value === 'string') {
       state.effort = normalizeReasoningEffort(value) ?? value
     }
@@ -697,18 +702,40 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
 
   ctx.on('system-prompt/assemble', async (assembly: any, context: any, next: any) => {
     const assembled = await (typeof next === 'function' ? next() : assembly)
-    const sessionId = context?.agent?.session?.id || context?.agent?.id || context?.scope?.session?.id
+    const sessionId =
+      context?.agent?.session?.id ||
+      context?.agent?.id ||
+      context?.scope?.session?.id ||
+      latestState?.sessionId
     const state = getSessionState(sessionId)
-    if (assembled && assembled.variables) {
-      assembled.variables.model = state.model
-      assembled.variables.provider = 'deepseek-official'
+    if (assembled) {
+      if (assembled.variables) {
+        assembled.variables.model = state.model
+        assembled.variables.provider = 'deepseek-official'
+      }
+      if (Array.isArray(assembled.sections)) {
+        assembled.sections = assembled.sections.map((section: any) => {
+          if (typeof section?.text === 'string') {
+            return {
+              ...section,
+              text: section.text
+                .replace(/powered by the (.*?) model/gi, `powered by the ${state.model} model`)
+                .replace(/powered by the \{\{model\}\} model/gi, `powered by the ${state.model} model`),
+            }
+          }
+          return section
+        })
+      }
     }
     return assembled
   })
 
   ctx.on('agent/request', async (payload: any, next: any) => {
     const resolved = await (typeof next === 'function' ? next() : payload)
-    const sessionId = payload?.agent?.session?.id || payload?.agent?.id
+    const sessionId =
+      payload?.agent?.session?.id ||
+      payload?.agent?.id ||
+      latestState?.sessionId
     const state = getSessionState(sessionId)
     const effort = normalizeReasoningEffort(state.effort)
     return {

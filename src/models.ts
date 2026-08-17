@@ -5,7 +5,11 @@ export interface ModelOption {
   description?: string
 }
 
-export const DEFAULT_MODEL = 'deepseek-v4-pro'
+export const DEFAULT_MODEL =
+  process.env.DEEPSEEK_MODEL ||
+  process.env.DSH_MODEL ||
+  process.env.MODEL ||
+  'deepseek-v4-pro'
 export const DEFAULT_EFFORT = 'max'
 
 export const SUPPORTED_MODELS: ModelOption[] = [
@@ -14,6 +18,18 @@ export const SUPPORTED_MODELS: ModelOption[] = [
   { id: 'deepseek-chat', name: 'DeepSeek Chat (V3)', contextWindow: 64_000 },
   { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner (R1)', contextWindow: 64_000 },
 ]
+
+export function getEffectiveSupportedModels(currentModel?: string): ModelOption[] {
+  const models = [...SUPPORTED_MODELS]
+  const envModel = process.env.DEEPSEEK_MODEL || process.env.DSH_MODEL || process.env.MODEL
+  if (envModel && !models.some((m) => m.id === envModel)) {
+    models.unshift({ id: envModel, name: envModel, contextWindow: 128_000 })
+  }
+  if (currentModel && !models.some((m) => m.id === currentModel)) {
+    models.unshift({ id: currentModel, name: currentModel, contextWindow: 128_000 })
+  }
+  return models
+}
 
 export const SUPPORTED_EFFORTS = [
   { id: 'off', name: 'Off' },
@@ -40,6 +56,7 @@ export interface SessionState {
 }
 
 export function buildConfigOptions(sessionState: { model: string; effort: string }) {
+  const models = getEffectiveSupportedModels(sessionState.model)
   return [
     {
       id: 'model',
@@ -47,7 +64,7 @@ export function buildConfigOptions(sessionState: { model: string; effort: string
       category: 'model',
       type: 'select' as const,
       currentValue: sessionState.model,
-      options: SUPPORTED_MODELS.map((m) => ({ value: m.id, name: m.name })),
+      options: models.map((m) => ({ value: m.id, name: m.name })),
     },
     {
       id: 'effort',
