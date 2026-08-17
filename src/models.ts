@@ -16,11 +16,21 @@ export const SUPPORTED_MODELS: ModelOption[] = [
 ]
 
 export const SUPPORTED_EFFORTS = [
-  { id: 'low', name: 'Low' },
-  { id: 'medium', name: 'Medium' },
+  { id: 'off', name: 'Off' },
   { id: 'high', name: 'High' },
   { id: 'max', name: 'Max' },
 ]
+
+export function normalizeReasoningEffort(effort?: string): 'off' | 'high' | 'max' | undefined {
+  if (!effort) return undefined
+  const val = effort.trim().toLowerCase()
+  if (val === 'off' || val === 'none' || val === 'disabled' || val === 'false') return 'off'
+  if (val === 'max') return 'max'
+  if (val === 'high') return 'high'
+  if (val === 'medium') return 'high'
+  if (val === 'low') return 'off'
+  return undefined
+}
 
 export interface SessionState {
   sessionId: string

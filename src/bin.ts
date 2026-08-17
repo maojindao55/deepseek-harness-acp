@@ -11,7 +11,7 @@ import { dirname, resolve } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { Readable, Writable } from 'node:stream'
 import { boot, installFailLoud, loadEnv, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
-import { buildConfigOptions, DEFAULT_EFFORT, DEFAULT_MODEL, SessionState } from './models.js'
+import { buildConfigOptions, DEFAULT_EFFORT, DEFAULT_MODEL, normalizeReasoningEffort, SessionState } from './models.js'
 import { metricsCollector } from './metrics.js'
 import { mcpManager } from './mcp/index.js'
 
@@ -115,7 +115,7 @@ function handleSetConfigOption(msg: any) {
     if (configId === 'model' && typeof value === 'string') {
       state.model = value
     } else if (configId === 'effort' && typeof value === 'string') {
-      state.effort = value
+      state.effort = normalizeReasoningEffort(value) ?? value
     }
     originalStdoutWrite(
       JSON.stringify({
@@ -710,10 +710,11 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
     const resolved = await (typeof next === 'function' ? next() : payload)
     const sessionId = payload?.agent?.session?.id || payload?.agent?.id
     const state = getSessionState(sessionId)
+    const effort = normalizeReasoningEffort(state.effort)
     return {
       ...resolved,
       model: state.model,
-      ...(state.effort ? { reasoningEffort: state.effort } : {}),
+      ...(effort ? { reasoningEffort: effort } : {}),
     }
   })
 

@@ -26,6 +26,18 @@ describe('End-to-End ACP Server Process Test', () => {
       }
     })
 
+    const waitForMessage = (id: number, timeout = 8000) =>
+      new Promise<any>((resolve, reject) => {
+        const start = Date.now()
+        const check = () => {
+          const hit = messages.find((m) => m.id === id)
+          if (hit) return resolve(hit)
+          if (Date.now() - start > timeout) return reject(new Error(`Timeout waiting for message id=${id}`))
+          setTimeout(check, 50)
+        }
+        check()
+      })
+
     // 1. Send initialize
     const initMsg = JSON.stringify({
       jsonrpc: '2.0',
@@ -38,10 +50,7 @@ describe('End-to-End ACP Server Process Test', () => {
     }) + '\n'
     child.stdin.write(initMsg)
 
-    // Wait for initialize response
-    await new Promise((r) => setTimeout(r, 1500))
-
-    const initRes = messages.find((m) => m.id === 1)
+    const initRes = await waitForMessage(1)
     expect(initRes).toBeDefined()
     expect(initRes.result.protocolVersion).toBe(1)
     expect(initRes.result.agentCapabilities.sessionCapabilities.resume).toBe(true)
@@ -59,10 +68,7 @@ describe('End-to-End ACP Server Process Test', () => {
     }) + '\n'
     child.stdin.write(newSessionMsg)
 
-    // Wait for newSession response
-    await new Promise((r) => setTimeout(r, 1500))
-
-    const sessionRes = messages.find((m) => m.id === 2)
+    const sessionRes = await waitForMessage(2)
     expect(sessionRes).toBeDefined()
     expect(sessionRes.result.sessionId).toBeDefined()
     // Verify configOptions are augmented by our server wrapper
@@ -82,9 +88,7 @@ describe('End-to-End ACP Server Process Test', () => {
     }) + '\n'
     child.stdin.write(setConfigMsg)
 
-    await new Promise((r) => setTimeout(r, 1000))
-
-    const configRes = messages.find((m) => m.id === 3)
+    const configRes = await waitForMessage(3)
     expect(configRes).toBeDefined()
     const modelOpt = configRes.result.configOptions.find((o: any) => o.id === 'model')
     expect(modelOpt.currentValue).toBe('deepseek-v4-flash')
@@ -101,6 +105,7 @@ describe('End-to-End ACP Server Process Test', () => {
       },
     }) + '\n'
     child.stdin.write(resumeMsg)
+    await waitForMessage(4)
 
     // 5. Send session/list
     const listMsg = JSON.stringify({
@@ -113,13 +118,11 @@ describe('End-to-End ACP Server Process Test', () => {
     }) + '\n'
     child.stdin.write(listMsg)
 
-    await new Promise((r) => setTimeout(r, 1000))
-
-    const listRes = messages.find((m) => m.id === 5)
+    const listRes = await waitForMessage(5)
     expect(listRes).toBeDefined()
     expect(Array.isArray(listRes.result.sessions)).toBe(true)
     expect(listRes.result.sessions.some((s: any) => s.sessionId === resumeSessionId)).toBe(true)
 
     child.kill('SIGTERM')
-  }, 15000)
+  }, 20000)
 })
