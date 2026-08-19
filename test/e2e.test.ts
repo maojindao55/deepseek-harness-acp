@@ -5,13 +5,15 @@ import { resolve } from 'node:path'
 describe('End-to-End ACP Server Process Test', () => {
   it('starts server, initializes, creates session and receives config options', async () => {
     const binPath = resolve(__dirname, '../src/bin.ts')
-    const child = spawn('npx', ['tsx', binPath], {
+    const isWin = process.platform === 'win32'
+    const child = spawn(isWin ? 'npx.cmd' : 'npx', ['tsx', binPath], {
       cwd: resolve(__dirname, '..'),
       env: {
         ...process.env,
         DSH_PERMISSION_MODE: 'danger-full-access',
       },
       stdio: ['pipe', 'pipe', 'pipe'],
+      shell: isWin,
     })
 
     const messages: any[] = []

@@ -6,3 +6,4 @@ lib/
 .DS_Store
 dist/
 coverage/
+package-lock.json

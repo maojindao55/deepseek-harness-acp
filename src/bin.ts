@@ -426,6 +426,29 @@ function wrapStdinWebStream(webStdin: any): any {
                 controller.enqueue(textEncoder.encode(JSON.stringify(sanitized) + '\n'))
                 continue
               }
+              if (parsed && parsed.method === 'session/prompt' && Array.isArray(parsed.params?.prompt)) {
+                const hasInlineImage = parsed.params.prompt.some((b: any) => b && b.type === 'image')
+                if (hasInlineImage) {
+                  const sanitizedPrompt = parsed.params.prompt.map((b: any) => {
+                    if (b && b.type === 'image') {
+                      return {
+                        type: 'text',
+                        text: `[图片附件: ${b.mimeType || 'image/png'}]`,
+                      }
+                    }
+                    return b
+                  })
+                  const sanitized = {
+                    ...parsed,
+                    params: {
+                      ...parsed.params,
+                      prompt: sanitizedPrompt,
+                    },
+                  }
+                  controller.enqueue(textEncoder.encode(JSON.stringify(sanitized) + '\n'))
+                  continue
+                }
+              }
             } catch {}
             controller.enqueue(textEncoder.encode(line + '\n'))
           }
