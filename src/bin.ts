@@ -11,7 +11,16 @@ import { dirname, resolve } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { Readable, Writable } from 'node:stream'
 import { boot, installFailLoud, loadEnv, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
-import { buildConfigOptions, DEFAULT_EFFORT, DEFAULT_MODEL, normalizeReasoningEffort, SessionState } from './models.js'
+import {
+  buildConfigOptions,
+  DEFAULT_EFFORT,
+  DEFAULT_MODEL,
+  formatModelDisplayName,
+  ModelOption,
+  normalizeReasoningEffort,
+  SessionState,
+  SUPPORTED_MODELS,
+} from './models.js'
 import { metricsCollector } from './metrics.js'
 import { mcpManager } from './mcp/index.js'
 
@@ -127,7 +136,7 @@ function handleSetConfigOption(msg: any) {
         jsonrpc: '2.0',
         id,
         result: {
-          configOptions: buildConfigOptions(state),
+          configOptions: buildConfigOptions(state, discoveredModels),
         },
       }) + '\n'
     )
@@ -164,17 +173,38 @@ function augmentPromptResult(parsed: any) {
 }
 
 let cordisCtx: any
+let discoveredModels: ModelOption[] = [...SUPPORTED_MODELS]
+
+async function refreshDiscoveredModels() {
+  if (cordisCtx?.llm?.listModels) {
+    try {
+      const list = await cordisCtx.llm.listModels('deepseek-official')
+      if (Array.isArray(list) && list.length > 0) {
+        discoveredModels = list.map((m: any) => ({
+          id: m.id,
+          name: m.name || formatModelDisplayName(m.id),
+          contextWindow: m.contextWindow || 1_000_000,
+          description: m.description,
+        }))
+      }
+    } catch {}
+  }
+}
+
 const activeSessionHandles = new Map<string, any>()
 
 function isResumedSession(sessionId: string): boolean {
   return activeSessionHandles.has(sessionId)
 }
 
-function createUserMessage(text: string) {
+function createUserMessage(content: any) {
+  const contentArray = Array.isArray(content)
+    ? content
+    : [{ type: 'text', text: String(content) }]
   return {
     id: `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
     role: 'user',
-    content: [{ type: 'text', text }],
+    content: contentArray,
     source: { kind: 'user' },
   }
 }
@@ -255,7 +285,7 @@ async function handleSessionResume(msg: any) {
         id,
         result: {
           sessionId,
-          configOptions: buildConfigOptions(state),
+          configOptions: buildConfigOptions(state, discoveredModels),
         },
       }) + '\n'
     )
@@ -291,8 +321,10 @@ async function handleSessionPrompt(msg: any) {
 
   metricsCollector.startPromptTurn(sessionId)
 
-  const text = acpPromptToText(params.prompt)
-  const message = createUserMessage(text)
+  const content = Array.isArray(params.prompt)
+    ? params.prompt
+    : [{ type: 'text', text: String(params.prompt || '') }]
+  const message = createUserMessage(content)
 
   try {
     agent.followup(message)
@@ -436,29 +468,6 @@ function wrapStdinWebStream(webStdin: any): any {
                 controller.enqueue(textEncoder.encode(JSON.stringify(sanitized) + '\n'))
                 continue
               }
-              if (parsed && parsed.method === 'session/prompt' && Array.isArray(parsed.params?.prompt)) {
-                const hasInlineImage = parsed.params.prompt.some((b: any) => b && b.type === 'image')
-                if (hasInlineImage) {
-                  const sanitizedPrompt = parsed.params.prompt.map((b: any) => {
-                    if (b && b.type === 'image') {
-                      return {
-                        type: 'text',
-                        text: `[图片附件: ${b.mimeType || 'image/png'}]`,
-                      }
-                    }
-                    return b
-                  })
-                  const sanitized = {
-                    ...parsed,
-                    params: {
-                      ...parsed.params,
-                      prompt: sanitizedPrompt,
-                    },
-                  }
-                  controller.enqueue(textEncoder.encode(JSON.stringify(sanitized) + '\n'))
-                  continue
-                }
-              }
             } catch {}
             controller.enqueue(textEncoder.encode(line + '\n'))
           }
@@ -497,6 +506,10 @@ function wrapStdoutWebStream(webStdout: any): any {
           if (parsed?.result?.agentCapabilities) {
             parsed.result.agentCapabilities = {
               ...parsed.result.agentCapabilities,
+              promptCapabilities: {
+                image: true,
+                ...(parsed.result.agentCapabilities?.promptCapabilities ?? {}),
+              },
               sessionCapabilities: {
                 resume: true,
                 list: true,
@@ -514,7 +527,7 @@ function wrapStdoutWebStream(webStdout: any): any {
 
           if (parsed?.result?.sessionId) {
             const state = getSessionState(parsed.result.sessionId)
-            parsed.result.configOptions = buildConfigOptions(state)
+            parsed.result.configOptions = buildConfigOptions(state, discoveredModels)
             await writer.write(textEncoder.encode(JSON.stringify(parsed) + '\n'))
             continue
           }
@@ -540,7 +553,7 @@ function wrapStdoutWebStream(webStdout: any): any {
           const parsed = JSON.parse(buffer.trim())
           if (parsed?.result?.sessionId) {
             const state = getSessionState(parsed.result.sessionId)
-            parsed.result.configOptions = buildConfigOptions(state)
+            parsed.result.configOptions = buildConfigOptions(state, discoveredModels)
             await writer.write(textEncoder.encode(JSON.stringify(parsed) + '\n'))
           } else if (parsed?.result?.stopReason) {
             augmentPromptResult(parsed)
@@ -782,7 +795,13 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
     mcpManager.setToolsService(toolsCtx.tools)
     mcpManager.loadWorkspaceMcp(process.cwd()).catch(() => {})
   })
+
+  ctx.on('llm/adapters-updated', () => {
+    refreshDiscoveredModels().catch(() => {})
+  })
 })
+
+await refreshDiscoveredModels()
 
 const handleExit = async () => {
   await mcpManager.closeAll()
