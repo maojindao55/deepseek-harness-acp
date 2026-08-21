@@ -214,6 +214,14 @@ async function handleSessionResume(msg: any) {
   const state = getSessionState(sessionId)
   state.cwd = cwd
 
+  if (params) {
+    try {
+      await mcpManager.handleSessionMcp(params)
+    } catch (err: any) {
+      console.error('[MCP] Failed to handle session MCP configuration:', err?.message || String(err))
+    }
+  }
+
   try {
     let agent = cordisCtx?.agents?.get?.(sessionId)
     if (!agent && cordisCtx?.agents) {
@@ -338,12 +346,14 @@ async function handleSessionList(msg: any) {
   )
 }
 
-function handleIncomingStdinMessage(parsed: any): boolean {
+async function handleIncomingStdinMessage(parsed: any): Promise<boolean> {
   if (parsed && (parsed.method === 'session/new' || parsed.method === 'session/resume' || parsed.method === 'session/load')) {
     if (parsed.params) {
-      mcpManager.handleSessionMcp(parsed.params).catch((err) => {
+      try {
+        await mcpManager.handleSessionMcp(parsed.params)
+      } catch (err: any) {
         console.error('[MCP] Failed to handle session MCP configuration:', err?.message || String(err))
-      })
+      }
     }
   }
   if (parsed && parsed.method === 'session/set_config_option') {
@@ -352,7 +362,7 @@ function handleIncomingStdinMessage(parsed: any): boolean {
   }
 
   if (parsed && (parsed.method === 'session/resume' || parsed.method === 'session/load')) {
-    handleSessionResume(parsed)
+    await handleSessionResume(parsed)
     return true
   }
   if (parsed && parsed.method === 'session/list') {
@@ -368,7 +378,7 @@ function handleIncomingStdinMessage(parsed: any): boolean {
   if (parsed && parsed.method === 'session/prompt' && parsed.params?.sessionId) {
     const promptSessionId = parsed.params.sessionId
     if (isResumedSession(promptSessionId)) {
-      handleSessionPrompt(parsed)
+      await handleSessionPrompt(parsed)
       return true
     }
     if (parsed.id !== undefined) {
@@ -394,7 +404,7 @@ function wrapStdinWebStream(webStdin: any): any {
             if (buffer.trim()) {
               try {
                 const parsed = JSON.parse(buffer.trim())
-                if (handleIncomingStdinMessage(parsed)) {
+                if (await handleIncomingStdinMessage(parsed)) {
                   break
                 }
               } catch {}
@@ -412,7 +422,7 @@ function wrapStdinWebStream(webStdin: any): any {
             if (!trimmed) continue
             try {
               const parsed = JSON.parse(trimmed)
-              if (handleIncomingStdinMessage(parsed)) {
+              if (await handleIncomingStdinMessage(parsed)) {
                 continue
               }
               if (parsed && parsed.method === 'session/new' && parsed.params?.mcpServers?.length) {

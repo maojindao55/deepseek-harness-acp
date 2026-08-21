@@ -125,6 +125,32 @@ describe('End-to-End ACP Server Process Test', () => {
     expect(Array.isArray(listRes.result.sessions)).toBe(true)
     expect(listRes.result.sessions.some((s: any) => s.sessionId === resumeSessionId)).toBe(true)
 
+    // 6. Send session/load with MCP servers
+    const loadSessionId = 'e2e-loaded-session-' + Date.now()
+    const mockServerScript = resolve(__dirname, 'fixtures/mock-mcp-server.ts')
+    const loadMsg = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 6,
+      method: 'session/load',
+      params: {
+        sessionId: loadSessionId,
+        cwd: process.cwd(),
+        mcpServers: [
+          {
+            name: 'mock-load-server',
+            command: 'npx',
+            args: ['tsx', mockServerScript],
+            prefix: 'mcp_load_',
+          },
+        ],
+      },
+    }) + '\n'
+    child.stdin.write(loadMsg)
+
+    const loadRes = await waitForMessage(6)
+    expect(loadRes).toBeDefined()
+    expect(loadRes.result.sessionId).toBe(loadSessionId)
+
     child.kill('SIGTERM')
   }, 20000)
 })
