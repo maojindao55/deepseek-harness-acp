@@ -78,6 +78,25 @@ Environment Variables:
   process.exit(0)
 }
 
+function inferToolName(rawArgs: any): string {
+  let args = rawArgs
+  if (typeof args === 'string') {
+    try {
+      args = JSON.parse(args)
+    } catch {
+      args = {}
+    }
+  }
+  if (args && typeof args === 'object') {
+    if ('command' in args) return 'bash'
+    if ('path' in args && ('offset' in args || 'limit' in args)) return 'read'
+    if ('path' in args && 'content' in args) return 'write'
+    if ('path' in args && ('old_str' in args || 'new_str' in args || 'patch' in args)) return 'edit'
+    if ('todos' in args) return 'todo'
+  }
+  return 'bash'
+}
+
 // Session state management
 const sessionStates = new Map<string, SessionState>()
 let latestState: SessionState | undefined
@@ -457,7 +476,13 @@ function wrapStdinWebStream(webStdin: any): any {
               if (await handleIncomingStdinMessage(parsed)) {
                 continue
               }
-              if (parsed && parsed.method === 'session/new' && parsed.params?.mcpServers?.length) {
+              if (
+                parsed &&
+                (parsed.method === 'session/new' ||
+                  parsed.method === 'session/resume' ||
+                  parsed.method === 'session/load') &&
+                parsed.params?.mcpServers?.length
+              ) {
                 const sanitized = {
                   ...parsed,
                   params: {
@@ -675,7 +700,6 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
     if (event.type === 'tool/call') {
       const callData = event.data
       const toolCallId = callData?.callId || callData?.id || `call_${Date.now()}`
-      const toolName = callData?.name || callData?.tool || 'tool'
       const rawInput =
         typeof callData?.arguments === 'string'
           ? (() => {
@@ -686,6 +710,11 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
               }
             })()
           : callData?.arguments || {}
+      let toolName = callData?.name || callData?.tool || ''
+      if (!toolName || toolName === 'tool') {
+        toolName = inferToolName(rawInput)
+        if (callData) callData.name = toolName
+      }
 
       originalStdoutWrite(
         JSON.stringify({
@@ -791,9 +820,100 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
     }
   })
 
+  ctx.on('llm/stream', async (options: any, next: any) => {
+    // Sanitize conversation messages: ensure any tool-call block in history has a valid, non-empty tool name
+    if (options && Array.isArray(options.messages)) {
+      for (const msg of options.messages) {
+        if (Array.isArray(msg.content)) {
+          for (const block of msg.content) {
+            if (block && block.type === 'tool-call') {
+              if (!block.name || block.name === 'tool' || block.name === '') {
+                block.name = inferToolName(block.arguments)
+              }
+            }
+          }
+        }
+      }
+    }
+    const stream = await (typeof next === 'function' ? next() : options)
+    if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
+      async function* sanitizeStream(innerStream: AsyncIterable<any>) {
+        let currentToolName = ''
+        for await (const chunk of innerStream) {
+          if (chunk && chunk.type === 'tool-call-delta') {
+            if (chunk.name) {
+              currentToolName = chunk.name
+            } else if (!currentToolName) {
+              currentToolName = inferToolName(chunk.argumentsDelta)
+              chunk.name = currentToolName
+            } else {
+              chunk.name = currentToolName
+            }
+          } else if (chunk && chunk.type === 'block-start' && chunk.blockType === 'tool-call') {
+            currentToolName = ''
+          }
+          yield chunk
+        }
+      }
+      return sanitizeStream(stream)
+    }
+    return stream
+  })
+
   ctx.inject(['tools'], (toolsCtx: any) => {
     mcpManager.setToolsService(toolsCtx.tools)
     mcpManager.loadWorkspaceMcp(process.cwd()).catch(() => {})
+
+    try {
+      if (!toolsCtx.tools.get('tool')) {
+        toolsCtx.tools.register({
+          name: 'tool',
+          description: 'Fallback command execution tool',
+          parameters: {
+            type: 'object',
+            properties: {
+              command: { type: 'string', description: 'Command to execute' },
+              description: { type: 'string', description: 'Description of the command' },
+            },
+            additionalProperties: true,
+          },
+          output: {
+            schema: { type: 'object', properties: {}, additionalProperties: true },
+            render(_args: any, value: any) {
+              return [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) }]
+            },
+            presentationMeta(_args: any, value: any) {
+              return value
+            },
+          },
+          presentCall(args: any) {
+            return { card: 'generic', title: 'tool', kind: 'other', rawInput: args }
+          },
+          async execute(args: any, exec: any) {
+            const bashTool = toolsCtx.tools.get('bash', exec?.agent)
+            if (bashTool && typeof bashTool.execute === 'function') {
+              return await bashTool.execute(args, exec)
+            }
+            if (cordisCtx?.shell) {
+              const result = await cordisCtx.shell.run(
+                cordisCtx.shell.resolve({
+                  command: args.command || args.input || '',
+                  dshEnv: cordisCtx.shellEnv?.collect?.(exec) || {},
+                  signal: exec?.signal,
+                })
+              )
+              return {
+                kind: 'foreground',
+                exitCode: result.exitCode ?? 0,
+                stdout: result.stdout?.text ?? '',
+                stderr: result.stderr?.text ?? '',
+              }
+            }
+            return { error: 'No execution engine available' }
+          },
+        })
+      }
+    } catch {}
   })
 
   ctx.on('llm/adapters-updated', () => {

@@ -190,4 +190,33 @@ describe('Stream and Prompt Result Augmentation logic', () => {
     expect(formattedUpdates[2].params.update.status).toBe('completed')
     expect(formattedUpdates[3].params.update.sessionUpdate).toBe('agent_message_chunk')
   })
+
+  it('infers tool names from arguments when name is empty or generic tool', () => {
+    function inferToolName(rawArgs: any): string {
+      let args = rawArgs
+      if (typeof args === 'string') {
+        try {
+          args = JSON.parse(args)
+        } catch {
+          args = {}
+        }
+      }
+      if (args && typeof args === 'object') {
+        if ('command' in args) return 'bash'
+        if ('path' in args && ('offset' in args || 'limit' in args)) return 'read'
+        if ('path' in args && 'content' in args) return 'write'
+        if ('path' in args && ('old_str' in args || 'new_str' in args || 'patch' in args)) return 'edit'
+        if ('todos' in args) return 'todo'
+      }
+      return 'bash'
+    }
+
+    expect(inferToolName({ command: 'ls -la', description: 'List files' })).toBe('bash')
+    expect(inferToolName('{"command":"git status"}')).toBe('bash')
+    expect(inferToolName({ path: 'test.txt', offset: 1, limit: 10 })).toBe('read')
+    expect(inferToolName({ path: 'test.txt', content: 'hello' })).toBe('write')
+    expect(inferToolName({ path: 'test.txt', old_str: 'a', new_str: 'b' })).toBe('edit')
+    expect(inferToolName({ todos: [] })).toBe('todo')
+    expect(inferToolName({})).toBe('bash')
+  })
 })
