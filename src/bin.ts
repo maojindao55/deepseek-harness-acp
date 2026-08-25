@@ -802,12 +802,33 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
     }
   })
 
-  ctx.on('llm/stream', async (options: any, next: any) => {
-    // Sanitize conversation messages: ensure any tool-call block in history has a valid, non-empty tool name
-    if (options && Array.isArray(options.messages)) {
-      options.messages = sanitizeMessagesHistory(options.messages)
+  ctx.on('llm/stream', (options: any, next: any) => {
+    const rawStream = typeof next === 'function' ? next() : options
+    if (rawStream && typeof rawStream[Symbol.asyncIterator] === 'function') {
+      async function* sanitizeStream(innerStream: AsyncIterable<any>) {
+        let currentToolName = ''
+        for await (const chunk of innerStream) {
+          if (chunk && chunk.type === 'tool-call-delta') {
+            if (chunk.name) {
+              currentToolName = chunk.name
+              yield chunk
+            } else if (!currentToolName) {
+              currentToolName = inferToolName(chunk.argumentsDelta)
+              yield { ...chunk, name: currentToolName }
+            } else {
+              yield { ...chunk, name: currentToolName }
+            }
+          } else if (chunk && chunk.type === 'block-start' && chunk.blockType === 'tool-call') {
+            currentToolName = ''
+            yield chunk
+          } else {
+            yield chunk
+          }
+        }
+      }
+      return sanitizeStream(rawStream)
     }
-    return typeof next === 'function' ? next() : options
+    return rawStream
   })
 
   ctx.inject(['tools'], (toolsCtx: any) => {
