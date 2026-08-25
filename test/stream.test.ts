@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { metricsCollector } from '../src/metrics.js'
+import { inferToolName, sanitizeMessagesHistory } from '../src/models.js'
 import { Readable, Writable } from 'node:stream'
 
 describe('Stream and Prompt Result Augmentation logic', () => {
@@ -192,25 +193,6 @@ describe('Stream and Prompt Result Augmentation logic', () => {
   })
 
   it('infers tool names from arguments when name is empty or generic tool', () => {
-    function inferToolName(rawArgs: any): string {
-      let args = rawArgs
-      if (typeof args === 'string') {
-        try {
-          args = JSON.parse(args)
-        } catch {
-          args = {}
-        }
-      }
-      if (args && typeof args === 'object') {
-        if ('command' in args) return 'bash'
-        if ('path' in args && ('offset' in args || 'limit' in args)) return 'read'
-        if ('path' in args && 'content' in args) return 'write'
-        if ('path' in args && ('old_str' in args || 'new_str' in args || 'patch' in args)) return 'edit'
-        if ('todos' in args) return 'todo'
-      }
-      return 'bash'
-    }
-
     expect(inferToolName({ command: 'ls -la', description: 'List files' })).toBe('bash')
     expect(inferToolName('{"command":"git status"}')).toBe('bash')
     expect(inferToolName({ path: 'test.txt', offset: 1, limit: 10 })).toBe('read')
@@ -218,5 +200,27 @@ describe('Stream and Prompt Result Augmentation logic', () => {
     expect(inferToolName({ path: 'test.txt', old_str: 'a', new_str: 'b' })).toBe('edit')
     expect(inferToolName({ todos: [] })).toBe('todo')
     expect(inferToolName({})).toBe('bash')
+  })
+
+  it('safely sanitizes message history with frozen tool-call objects without throwing', () => {
+    const frozenBlock = Object.freeze({
+      type: 'tool-call',
+      name: '',
+      arguments: { command: 'npm test' },
+    })
+    const frozenMsg = Object.freeze({
+      role: 'assistant',
+      content: [frozenBlock],
+    })
+    const messages = [frozenMsg]
+
+    // Should not throw TypeError: Cannot assign to read only property
+    const sanitized = sanitizeMessagesHistory(messages)
+    expect(sanitized).toHaveLength(1)
+    expect(sanitized[0].content[0].name).toBe('bash')
+    expect(sanitized[0].content[0].type).toBe('tool-call')
+
+    // Original frozen objects remain unchanged
+    expect(frozenBlock.name).toBe('')
   })
 })

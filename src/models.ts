@@ -83,3 +83,41 @@ export function buildConfigOptions(sessionState: { model: string; effort: string
     },
   ]
 }
+
+export function inferToolName(rawArgs: any): string {
+  let args = rawArgs
+  if (typeof args === 'string') {
+    try {
+      args = JSON.parse(args)
+    } catch {
+      args = {}
+    }
+  }
+  if (args && typeof args === 'object') {
+    if ('command' in args) return 'bash'
+    if ('path' in args && ('offset' in args || 'limit' in args)) return 'read'
+    if ('path' in args && 'content' in args) return 'write'
+    if ('path' in args && ('old_str' in args || 'new_str' in args || 'patch' in args)) return 'edit'
+    if ('todos' in args) return 'todo'
+  }
+  return 'bash'
+}
+
+export function sanitizeMessagesHistory(messages: any[]): any[] {
+  if (!Array.isArray(messages)) return messages
+  return messages.map((msg: any) => {
+    if (!Array.isArray(msg?.content)) return msg
+    let contentChanged = false
+    const newContent = msg.content.map((block: any) => {
+      if (block && block.type === 'tool-call' && (!block.name || block.name === 'tool' || block.name === '')) {
+        contentChanged = true
+        return {
+          ...block,
+          name: inferToolName(block.arguments),
+        }
+      }
+      return block
+    })
+    return contentChanged ? { ...msg, content: newContent } : msg
+  })
+}

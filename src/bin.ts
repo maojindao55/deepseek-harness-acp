@@ -16,8 +16,10 @@ import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
   formatModelDisplayName,
+  inferToolName,
   ModelOption,
   normalizeReasoningEffort,
+  sanitizeMessagesHistory,
   SessionState,
   SUPPORTED_MODELS,
 } from './models.js'
@@ -76,25 +78,6 @@ Environment Variables:
   DSH_SESSIONS_ROOT     Directory path for session persistence (default: ./.sessions)
 `)
   process.exit(0)
-}
-
-function inferToolName(rawArgs: any): string {
-  let args = rawArgs
-  if (typeof args === 'string') {
-    try {
-      args = JSON.parse(args)
-    } catch {
-      args = {}
-    }
-  }
-  if (args && typeof args === 'object') {
-    if ('command' in args) return 'bash'
-    if ('path' in args && ('offset' in args || 'limit' in args)) return 'read'
-    if ('path' in args && 'content' in args) return 'write'
-    if ('path' in args && ('old_str' in args || 'new_str' in args || 'patch' in args)) return 'edit'
-    if ('todos' in args) return 'todo'
-  }
-  return 'bash'
 }
 
 // Session state management
@@ -713,7 +696,6 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
       let toolName = callData?.name || callData?.tool || ''
       if (!toolName || toolName === 'tool') {
         toolName = inferToolName(rawInput)
-        if (callData) callData.name = toolName
       }
 
       originalStdoutWrite(
@@ -823,41 +805,9 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
   ctx.on('llm/stream', async (options: any, next: any) => {
     // Sanitize conversation messages: ensure any tool-call block in history has a valid, non-empty tool name
     if (options && Array.isArray(options.messages)) {
-      for (const msg of options.messages) {
-        if (Array.isArray(msg.content)) {
-          for (const block of msg.content) {
-            if (block && block.type === 'tool-call') {
-              if (!block.name || block.name === 'tool' || block.name === '') {
-                block.name = inferToolName(block.arguments)
-              }
-            }
-          }
-        }
-      }
+      options.messages = sanitizeMessagesHistory(options.messages)
     }
-    const stream = await (typeof next === 'function' ? next() : options)
-    if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
-      async function* sanitizeStream(innerStream: AsyncIterable<any>) {
-        let currentToolName = ''
-        for await (const chunk of innerStream) {
-          if (chunk && chunk.type === 'tool-call-delta') {
-            if (chunk.name) {
-              currentToolName = chunk.name
-            } else if (!currentToolName) {
-              currentToolName = inferToolName(chunk.argumentsDelta)
-              chunk.name = currentToolName
-            } else {
-              chunk.name = currentToolName
-            }
-          } else if (chunk && chunk.type === 'block-start' && chunk.blockType === 'tool-call') {
-            currentToolName = ''
-          }
-          yield chunk
-        }
-      }
-      return sanitizeStream(stream)
-    }
-    return stream
+    return typeof next === 'function' ? next() : options
   })
 
   ctx.inject(['tools'], (toolsCtx: any) => {
