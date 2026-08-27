@@ -93,9 +93,8 @@ export function inferToolName(rawArgs: any): string {
       args = JSON.parse(trimmed)
     } catch {
       if (/["']?command["']?\s*:/i.test(trimmed) || /["']?cmd["']?\s*:/i.test(trimmed)) return 'bash'
-      if (/["']?path["']?\s*:/i.test(trimmed)) {
-        if (/["']?(offset|limit|line)["']?\s*:/i.test(trimmed)) return 'read'
-        if (/["']?(old_str|new_str|patch|replace)["']?\s*:/i.test(trimmed)) return 'edit'
+      if (/["']?(file_path|filePath|path|filename|file)["']?\s*:/i.test(trimmed)) {
+        if (/["']?(old_string|new_string|old_str|new_str|patch|replace)["']?\s*:/i.test(trimmed)) return 'edit'
         if (/["']?content["']?\s*:/i.test(trimmed)) return 'write'
         return 'read'
       }
@@ -105,10 +104,19 @@ export function inferToolName(rawArgs: any): string {
   }
   if (args && typeof args === 'object') {
     if ('command' in args || 'cmd' in args || 'input' in args) return 'bash'
-    if ('path' in args) {
-      if ('offset' in args || 'limit' in args || 'line' in args) return 'read'
-      if ('old_str' in args || 'new_str' in args || 'patch' in args || 'replace' in args) return 'edit'
-      if ('content' in args) return 'write'
+    if ('file_path' in args || 'filePath' in args || 'path' in args || 'filename' in args || 'file' in args) {
+      if (
+        'old_string' in args ||
+        'new_string' in args ||
+        'old_str' in args ||
+        'new_str' in args ||
+        'patch' in args ||
+        'replace' in args ||
+        'replace_all' in args
+      ) {
+        return 'edit'
+      }
+      if ('content' in args || 'text' in args) return 'write'
       return 'read'
     }
     if ('todos' in args) return 'todo'
@@ -141,17 +149,24 @@ export function sanitizeMessagesHistory(messages: any[]): any[] {
           targetName = inferToolName(rawArgs)
         }
 
-        if (targetName === 'bash' && (!rawArgs.command || !String(rawArgs.command).trim())) {
-          rawArgs.command = 'echo "No command specified"'
-          if (!rawArgs.description) rawArgs.description = 'Fallback command'
+        let targetId = typeof block.id === 'string' ? block.id.trim() : ''
+        if (!targetId) {
+          targetId = `call_${Date.now()}_${Math.random().toString(36).slice(2)}`
         }
 
-        const stringifiedArgs = JSON.stringify(rawArgs) || '{}'
+        let updatedArgs = { ...rawArgs }
+        if (targetName === 'bash' && (!updatedArgs.command || !String(updatedArgs.command).trim())) {
+          updatedArgs.command = 'echo "No command specified"'
+          if (!updatedArgs.description) updatedArgs.description = 'Fallback command'
+        }
 
-        if (block.name !== targetName || block.arguments !== stringifiedArgs) {
+        const stringifiedArgs = JSON.stringify(updatedArgs) || '{}'
+
+        if (block.name !== targetName || block.id !== targetId || block.arguments !== stringifiedArgs) {
           contentChanged = true
           return {
             ...block,
+            id: targetId,
             name: targetName,
             arguments: stringifiedArgs,
           }

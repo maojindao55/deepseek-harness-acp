@@ -819,11 +819,16 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
         exec.name = inferToolName(exec.arguments)
       }
       if (exec.name === 'bash') {
-        if (!exec.arguments || typeof exec.arguments !== 'object') {
+        const rawArgs = exec.arguments
+        if (!rawArgs || typeof rawArgs !== 'object') {
           exec.arguments = { command: 'echo "No command specified"', description: 'No-op fallback' }
-        } else if (!exec.arguments.command || !String(exec.arguments.command).trim()) {
-          exec.arguments.command = 'echo "No command specified"'
-          if (!exec.arguments.description) exec.arguments.description = 'No-op fallback'
+        } else if (!rawArgs.command || !String(rawArgs.command).trim()) {
+          // Never mutate rawArgs in place in case it is frozen by dsh-llm
+          exec.arguments = {
+            ...rawArgs,
+            command: 'echo "No command specified"',
+            description: rawArgs.description || 'No-op fallback',
+          }
         }
       }
     }
@@ -863,8 +868,11 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
             }
             toolNamesByIndex.set(idx, finalName)
 
+            const finalId = chunk.id || `call_${idx}_${Date.now()}`
+
             yield {
               ...chunk,
+              id: finalId,
               name: finalName,
             }
             continue

@@ -198,10 +198,12 @@ describe('Stream and Prompt Result Augmentation logic', () => {
     expect(inferToolName('{"command": "ls -la"')).toBe('bash') // partial json
     expect(inferToolName({ path: 'test.txt', offset: 1, limit: 10 })).toBe('read')
     expect(inferToolName('{"path": "test.txt", "offset": 10')).toBe('read')
+    expect(inferToolName({ file_path: 'E:\\docs\\script.md' })).toBe('read')
+    expect(inferToolName('{"file_path": "E:\\\\docs\\\\script.md"}')).toBe('read')
     expect(inferToolName({ path: 'test.txt', content: 'hello' })).toBe('write')
-    expect(inferToolName('{"path": "test.txt", "content": "hi"')).toBe('write')
-    expect(inferToolName({ path: 'test.txt', old_str: 'a', new_str: 'b' })).toBe('edit')
-    expect(inferToolName('{"path": "test.txt", "patch": "..."')).toBe('edit')
+    expect(inferToolName('{"file_path": "test.txt", "content": "hi"}')).toBe('write')
+    expect(inferToolName({ file_path: 'test.txt', old_string: 'a', new_string: 'b' })).toBe('edit')
+    expect(inferToolName('{"file_path": "test.txt", "patch": "..."')).toBe('edit')
     expect(inferToolName({ todos: [] })).toBe('todo')
     expect(inferToolName('{"todos": [')).toBe('todo')
     expect(inferToolName({})).toBe('bash')
@@ -213,7 +215,7 @@ describe('Stream and Prompt Result Augmentation logic', () => {
     const frozenBlock = Object.freeze({
       type: 'tool-call',
       name: '',
-      arguments: { command: 'npm test' },
+      arguments: { file_path: 'E:\\docs\\script.md' },
     })
     const frozenMsg = Object.freeze({
       role: 'assistant',
@@ -224,8 +226,10 @@ describe('Stream and Prompt Result Augmentation logic', () => {
     // Should not throw TypeError: Cannot assign to read only property
     const sanitized = sanitizeMessagesHistory(messages)
     expect(sanitized).toHaveLength(1)
-    expect(sanitized[0].content[0].name).toBe('bash')
+    expect(sanitized[0].content[0].name).toBe('read')
     expect(sanitized[0].content[0].type).toBe('tool-call')
+    expect(sanitized[0].content[0].id).toBeDefined()
+    expect(sanitized[0].content[0].id.length).toBeGreaterThan(0)
 
     // Original frozen objects remain unchanged
     expect(frozenBlock.name).toBe('')
