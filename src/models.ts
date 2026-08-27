@@ -10,7 +10,7 @@ export const DEFAULT_MODEL =
   process.env.DSH_MODEL ||
   process.env.MODEL ||
   'deepseek-v4-pro'
-export const DEFAULT_EFFORT = 'max'
+export const DEFAULT_EFFORT = 'high'
 
 export const SUPPORTED_MODELS: ModelOption[] = [
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', contextWindow: 1_000_000 },
@@ -39,20 +39,19 @@ export function getEffectiveSupportedModels(currentModel?: string, baseModels?: 
 }
 
 export const SUPPORTED_EFFORTS = [
-  { id: 'off', name: 'Off' },
+  { id: 'off', name: 'Off / None' },
+  { id: 'low', name: 'Low' },
   { id: 'high', name: 'High' },
   { id: 'max', name: 'Max' },
 ]
 
-export function normalizeReasoningEffort(effort?: string): 'off' | 'high' | 'max' | undefined {
+export function normalizeReasoningEffort(effort?: string): 'off' | 'low' | 'high' | undefined {
   if (!effort) return undefined
   const val = effort.trim().toLowerCase()
   if (val === 'off' || val === 'none' || val === 'disabled' || val === 'false') return 'off'
-  if (val === 'max') return 'max'
-  if (val === 'high') return 'high'
-  if (val === 'medium') return 'high'
-  if (val === 'low') return 'off'
-  return undefined
+  if (val === 'low') return 'low'
+  if (val === 'medium' || val === 'high' || val === 'max' || val === 'xhigh') return 'high'
+  return 'high'
 }
 
 export interface SessionState {
@@ -85,19 +84,33 @@ export function buildConfigOptions(sessionState: { model: string; effort: string
 }
 
 export function inferToolName(rawArgs: any): string {
+  if (!rawArgs) return 'bash'
   let args = rawArgs
   if (typeof args === 'string') {
+    const trimmed = args.trim()
+    if (!trimmed) return 'bash'
     try {
-      args = JSON.parse(args)
+      args = JSON.parse(trimmed)
     } catch {
-      args = {}
+      if (/["']?command["']?\s*:/i.test(trimmed) || /["']?cmd["']?\s*:/i.test(trimmed)) return 'bash'
+      if (/["']?path["']?\s*:/i.test(trimmed)) {
+        if (/["']?(offset|limit|line)["']?\s*:/i.test(trimmed)) return 'read'
+        if (/["']?(old_str|new_str|patch|replace)["']?\s*:/i.test(trimmed)) return 'edit'
+        if (/["']?content["']?\s*:/i.test(trimmed)) return 'write'
+        return 'read'
+      }
+      if (/["']?todos["']?\s*:/i.test(trimmed)) return 'todo'
+      return 'bash'
     }
   }
   if (args && typeof args === 'object') {
-    if ('command' in args) return 'bash'
-    if ('path' in args && ('offset' in args || 'limit' in args)) return 'read'
-    if ('path' in args && 'content' in args) return 'write'
-    if ('path' in args && ('old_str' in args || 'new_str' in args || 'patch' in args)) return 'edit'
+    if ('command' in args || 'cmd' in args || 'input' in args) return 'bash'
+    if ('path' in args) {
+      if ('offset' in args || 'limit' in args || 'line' in args) return 'read'
+      if ('old_str' in args || 'new_str' in args || 'patch' in args || 'replace' in args) return 'edit'
+      if ('content' in args) return 'write'
+      return 'read'
+    }
     if ('todos' in args) return 'todo'
   }
   return 'bash'
@@ -106,14 +119,17 @@ export function inferToolName(rawArgs: any): string {
 export function sanitizeMessagesHistory(messages: any[]): any[] {
   if (!Array.isArray(messages)) return messages
   return messages.map((msg: any) => {
-    if (!Array.isArray(msg?.content)) return msg
+    if (!msg || !Array.isArray(msg.content)) return msg
     let contentChanged = false
     const newContent = msg.content.map((block: any) => {
-      if (block && block.type === 'tool-call' && (!block.name || block.name === 'tool' || block.name === '')) {
-        contentChanged = true
-        return {
-          ...block,
-          name: inferToolName(block.arguments),
+      if (block && block.type === 'tool-call') {
+        const currentName = typeof block.name === 'string' ? block.name.trim() : ''
+        if (!currentName || currentName === 'tool') {
+          contentChanged = true
+          return {
+            ...block,
+            name: inferToolName(block.arguments),
+          }
         }
       }
       return block

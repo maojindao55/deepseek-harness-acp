@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { metricsCollector } from '../src/metrics.js'
-import { inferToolName, sanitizeMessagesHistory } from '../src/models.js'
+import { inferToolName, normalizeReasoningEffort, sanitizeMessagesHistory, DEFAULT_EFFORT, SUPPORTED_EFFORTS } from '../src/models.js'
 import { Readable, Writable } from 'node:stream'
 
 describe('Stream and Prompt Result Augmentation logic', () => {
@@ -195,11 +195,18 @@ describe('Stream and Prompt Result Augmentation logic', () => {
   it('infers tool names from arguments when name is empty or generic tool', () => {
     expect(inferToolName({ command: 'ls -la', description: 'List files' })).toBe('bash')
     expect(inferToolName('{"command":"git status"}')).toBe('bash')
+    expect(inferToolName('{"command": "ls -la"')).toBe('bash') // partial json
     expect(inferToolName({ path: 'test.txt', offset: 1, limit: 10 })).toBe('read')
+    expect(inferToolName('{"path": "test.txt", "offset": 10')).toBe('read')
     expect(inferToolName({ path: 'test.txt', content: 'hello' })).toBe('write')
+    expect(inferToolName('{"path": "test.txt", "content": "hi"')).toBe('write')
     expect(inferToolName({ path: 'test.txt', old_str: 'a', new_str: 'b' })).toBe('edit')
+    expect(inferToolName('{"path": "test.txt", "patch": "..."')).toBe('edit')
     expect(inferToolName({ todos: [] })).toBe('todo')
+    expect(inferToolName('{"todos": [')).toBe('todo')
     expect(inferToolName({})).toBe('bash')
+    expect(inferToolName('')).toBe('bash')
+    expect(inferToolName(null)).toBe('bash')
   })
 
   it('safely sanitizes message history with frozen tool-call objects without throwing', () => {
@@ -222,5 +229,18 @@ describe('Stream and Prompt Result Augmentation logic', () => {
 
     // Original frozen objects remain unchanged
     expect(frozenBlock.name).toBe('')
+  })
+
+  it('correctly normalizes reasoning effort for safe API gateway execution', () => {
+    expect(DEFAULT_EFFORT).toBe('high')
+    expect(normalizeReasoningEffort('off')).toBe('off')
+    expect(normalizeReasoningEffort('none')).toBe('off')
+    expect(normalizeReasoningEffort('disabled')).toBe('off')
+    expect(normalizeReasoningEffort('low')).toBe('low')
+    expect(normalizeReasoningEffort('medium')).toBe('high')
+    expect(normalizeReasoningEffort('high')).toBe('high')
+    expect(normalizeReasoningEffort('max')).toBe('high')
+    expect(normalizeReasoningEffort('xhigh')).toBe('high')
+    expect(normalizeReasoningEffort(undefined)).toBeUndefined()
   })
 })

@@ -787,6 +787,17 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
     return assembled
   })
 
+  ctx.on('agent/pre-step', async (payload: any, next: any) => {
+    const decision = await (typeof next === 'function' ? next() : payload)
+    if (decision && Array.isArray(decision.messages)) {
+      return {
+        ...decision,
+        messages: sanitizeMessagesHistory(decision.messages),
+      }
+    }
+    return decision
+  })
+
   ctx.on('agent/request', async (payload: any, next: any) => {
     const resolved = await (typeof next === 'function' ? next() : payload)
     const sessionId =
@@ -802,28 +813,54 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
     }
   })
 
+  ctx.on('tools/execute', async (exec: any, next: any) => {
+    if (exec && (!exec.name || exec.name === 'tool' || (typeof exec.name === 'string' && !exec.name.trim()))) {
+      exec.name = inferToolName(exec.arguments)
+    }
+    return typeof next === 'function' ? next() : undefined
+  })
+
   ctx.on('llm/stream', (options: any, next: any) => {
     const rawStream = typeof next === 'function' ? next() : options
     if (rawStream && typeof rawStream[Symbol.asyncIterator] === 'function') {
       async function* sanitizeStream(innerStream: AsyncIterable<any>) {
-        let currentToolName = ''
+        const toolNamesByIndex = new Map<number, string>()
+        const toolArgsByIndex = new Map<number, string>()
+
         for await (const chunk of innerStream) {
-          if (chunk && chunk.type === 'tool-call-delta') {
-            if (chunk.name) {
-              currentToolName = chunk.name
-              yield chunk
-            } else if (!currentToolName) {
-              currentToolName = inferToolName(chunk.argumentsDelta)
-              yield { ...chunk, name: currentToolName }
-            } else {
-              yield { ...chunk, name: currentToolName }
-            }
-          } else if (chunk && chunk.type === 'block-start' && chunk.blockType === 'tool-call') {
-            currentToolName = ''
+          if (!chunk) continue
+
+          if (chunk.type === 'block-start' && chunk.blockType === 'tool-call') {
+            const idx = chunk.index ?? 0
+            toolNamesByIndex.delete(idx)
+            toolArgsByIndex.delete(idx)
             yield chunk
-          } else {
-            yield chunk
+            continue
           }
+
+          if (chunk.type === 'tool-call-delta') {
+            const idx = chunk.index ?? 0
+            const existingName = toolNamesByIndex.get(idx) || ''
+            const incomingName = typeof chunk.name === 'string' ? chunk.name.trim() : ''
+            const argDelta = typeof chunk.argumentsDelta === 'string' ? chunk.argumentsDelta : ''
+
+            const accumulatedArgs = (toolArgsByIndex.get(idx) || '') + argDelta
+            toolArgsByIndex.set(idx, accumulatedArgs)
+
+            let finalName = incomingName || existingName
+            if (!finalName || finalName === 'tool') {
+              finalName = inferToolName(accumulatedArgs)
+            }
+            toolNamesByIndex.set(idx, finalName)
+
+            yield {
+              ...chunk,
+              name: finalName,
+            }
+            continue
+          }
+
+          yield chunk
         }
       }
       return sanitizeStream(rawStream)
