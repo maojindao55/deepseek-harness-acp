@@ -84,6 +84,8 @@ Environment Variables:
 const sessionStates = new Map<string, SessionState>()
 let latestState: SessionState | undefined
 const pendingPromptSessions = new Map<string | number, string>()
+const toolCallSeqMap = new Map<number, string>()
+const activeToolCallQueue: string[] = []
 
 function getSessionState(sessionId?: string): SessionState {
   if (sessionId && sessionStates.has(sessionId)) {
@@ -682,7 +684,17 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
     // 2. Tool calls
     if (event.type === 'tool/call') {
       const callData = event.data
-      const toolCallId = callData?.callId || callData?.id || `call_${Date.now()}`
+      const rawCallId = callData?.callId || callData?.id
+      const toolCallId =
+        rawCallId && String(rawCallId).trim()
+          ? String(rawCallId).trim()
+          : `call_${event.seq || Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+      if (event.seq !== undefined) {
+        toolCallSeqMap.set(event.seq, toolCallId)
+      }
+      activeToolCallQueue.push(toolCallId)
+
       const rawInput =
         typeof callData?.arguments === 'string'
           ? (() => {
@@ -720,7 +732,19 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
     if (event.type === 'tool/result') {
       const resultData = event.data
       const message = resultData?.message
-      const toolCallId = message?.callId || resultData?.callId || resultData?.id
+      const rawCallId = message?.callId || resultData?.callId || resultData?.id
+      let toolCallId = rawCallId && String(rawCallId).trim() ? String(rawCallId).trim() : ''
+
+      if (!toolCallId && Array.isArray(event.sourceEventSeqs) && event.sourceEventSeqs.length > 0) {
+        toolCallId = toolCallSeqMap.get(event.sourceEventSeqs[0]) || ''
+      }
+      if (!toolCallId && activeToolCallQueue.length > 0) {
+        toolCallId = activeToolCallQueue.shift()!
+      }
+      if (!toolCallId) {
+        toolCallId = `call_${Date.now()}`
+      }
+
       const isError = Boolean(message?.isError || resultData?.error || resultData?.isError)
 
       let rawOutput: any = ''
