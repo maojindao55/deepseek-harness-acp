@@ -826,12 +826,14 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
       latestState?.sessionId
     const state = getSessionState(sessionId)
     if (assembled) {
-      if (assembled.variables) {
-        assembled.variables.model = state.model
-        assembled.variables.provider = 'deepseek-official'
+      const variables = {
+        ...(assembled.variables || {}),
+        model: state.model,
+        provider: 'deepseek-official',
       }
-      if (Array.isArray(assembled.sections)) {
-        assembled.sections = assembled.sections.map((section: any) => {
+      let sections = assembled.sections
+      if (Array.isArray(sections)) {
+        sections = sections.map((section: any) => {
           if (typeof section?.text === 'string') {
             return {
               ...section,
@@ -842,6 +844,11 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
           }
           return section
         })
+      }
+      return {
+        ...assembled,
+        variables,
+        sections,
       }
     }
     return assembled
@@ -903,9 +910,6 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
   })
 
   ctx.on('llm/stream', (options: any, next: any) => {
-    if (options && Array.isArray(options.messages)) {
-      options.messages = sanitizeMessagesHistory(options.messages)
-    }
     const rawStream = typeof next === 'function' ? next() : options
     if (rawStream && typeof rawStream[Symbol.asyncIterator] === 'function') {
       async function* sanitizeStream(innerStream: AsyncIterable<any>) {
