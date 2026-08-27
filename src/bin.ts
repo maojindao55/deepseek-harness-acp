@@ -20,6 +20,7 @@ import {
   ModelOption,
   normalizeReasoningEffort,
   sanitizeMessagesHistory,
+  sanitizeToolCallStream,
   SessionState,
   SUPPORTED_MODELS,
 } from './models.js'
@@ -912,50 +913,7 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
   ctx.on('llm/stream', (options: any, next: any) => {
     const rawStream = typeof next === 'function' ? next() : options
     if (rawStream && typeof rawStream[Symbol.asyncIterator] === 'function') {
-      async function* sanitizeStream(innerStream: AsyncIterable<any>) {
-        const toolNamesByIndex = new Map<number, string>()
-        const toolArgsByIndex = new Map<number, string>()
-
-        for await (const chunk of innerStream) {
-          if (!chunk) continue
-
-          if (chunk.type === 'block-start' && chunk.blockType === 'tool-call') {
-            const idx = chunk.index ?? 0
-            toolNamesByIndex.delete(idx)
-            toolArgsByIndex.delete(idx)
-            yield chunk
-            continue
-          }
-
-          if (chunk.type === 'tool-call-delta') {
-            const idx = chunk.index ?? 0
-            const existingName = toolNamesByIndex.get(idx) || ''
-            const incomingName = typeof chunk.name === 'string' ? chunk.name.trim() : ''
-            const argDelta = typeof chunk.argumentsDelta === 'string' ? chunk.argumentsDelta : ''
-
-            const accumulatedArgs = (toolArgsByIndex.get(idx) || '') + argDelta
-            toolArgsByIndex.set(idx, accumulatedArgs)
-
-            let finalName = incomingName || existingName
-            if (!finalName || finalName === 'tool') {
-              finalName = inferToolName(accumulatedArgs)
-            }
-            toolNamesByIndex.set(idx, finalName)
-
-            const finalId = chunk.id || `call_${idx}_${Date.now()}`
-
-            yield {
-              ...chunk,
-              id: finalId,
-              name: finalName,
-            }
-            continue
-          }
-
-          yield chunk
-        }
-      }
-      return sanitizeStream(rawStream)
+      return sanitizeToolCallStream(rawStream)
     }
     return rawStream
   })

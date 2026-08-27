@@ -124,6 +124,142 @@ export function inferToolName(rawArgs: any): string {
   return 'bash'
 }
 
+interface ToolCallFallback {
+  id?: string
+  name?: string
+  arguments?: any
+}
+
+function parseToolCallArguments(rawArgs: any): Record<string, any> {
+  if (typeof rawArgs === 'string') {
+    const trimmed = rawArgs.trim()
+    if (!trimmed) return {}
+    try {
+      const parsed = JSON.parse(trimmed)
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : { input: parsed }
+    } catch {
+      return { input: rawArgs }
+    }
+  }
+  if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
+    return rawArgs === undefined || rawArgs === null ? {} : { input: rawArgs }
+  }
+  return rawArgs
+}
+
+function hasToolCallArguments(rawArgs: any): boolean {
+  if (typeof rawArgs === 'string') return rawArgs.trim().length > 0
+  return rawArgs !== undefined && rawArgs !== null
+}
+
+/**
+ * Return a valid, cloned tool-call block. DeepSeek may stream a tool call whose
+ * final block has an empty name, id, or arguments even when earlier deltas were
+ * usable. The fallback carries those accumulated delta values into the final
+ * block so the assembler cannot overwrite the repaired data.
+ */
+export function sanitizeToolCallBlock(block: any, fallback: ToolCallFallback = {}): any {
+  const blockName = typeof block?.name === 'string' ? block.name.trim() : ''
+  const fallbackName = typeof fallback.name === 'string' ? fallback.name.trim() : ''
+  const rawArgs = hasToolCallArguments(block?.arguments)
+    ? block.arguments
+    : fallback.arguments
+  const parsedArgs = parseToolCallArguments(rawArgs)
+
+  let name = blockName && blockName !== 'tool' ? blockName : fallbackName
+  if (!name || name === 'tool') {
+    name = inferToolName(parsedArgs)
+  }
+
+  const argumentsObject = { ...parsedArgs }
+  if (name === 'bash' && (!argumentsObject.command || !String(argumentsObject.command).trim())) {
+    argumentsObject.command = 'echo "No command specified"'
+    if (!argumentsObject.description) argumentsObject.description = 'Fallback command'
+  } else if (name === 'read' && !argumentsObject.file_path && !argumentsObject.path) {
+    argumentsObject.file_path = '.'
+  }
+
+  const blockId = typeof block?.id === 'string' ? block.id.trim() : ''
+  const fallbackId = typeof fallback.id === 'string' ? fallback.id.trim() : ''
+  const id = blockId || fallbackId || `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+  return {
+    ...block,
+    type: 'tool-call',
+    id,
+    name,
+    arguments: JSON.stringify(argumentsObject) || '{}',
+  }
+}
+
+/** Sanitize tool-call deltas and, critically, their authoritative block-end. */
+export async function* sanitizeToolCallStream(innerStream: AsyncIterable<any>): AsyncGenerator<any> {
+  const toolNamesByIndex = new Map<number, string>()
+  const explicitToolNamesByIndex = new Map<number, string>()
+  const toolArgsByIndex = new Map<number, string>()
+  const toolIdsByIndex = new Map<number, string>()
+
+  for await (const chunk of innerStream) {
+    if (!chunk) continue
+
+    if (chunk.type === 'block-start' && chunk.blockType === 'tool-call') {
+      const index = chunk.index ?? 0
+      toolNamesByIndex.delete(index)
+      explicitToolNamesByIndex.delete(index)
+      toolArgsByIndex.delete(index)
+      toolIdsByIndex.delete(index)
+      yield chunk
+      continue
+    }
+
+    if (chunk.type === 'tool-call-delta') {
+      const index = chunk.index ?? 0
+      const incomingName = typeof chunk.name === 'string' ? chunk.name.trim() : ''
+      const argumentsDelta = typeof chunk.argumentsDelta === 'string' ? chunk.argumentsDelta : ''
+      const accumulatedArgs = (toolArgsByIndex.get(index) || '') + argumentsDelta
+      toolArgsByIndex.set(index, accumulatedArgs)
+
+      if (incomingName && incomingName !== 'tool') {
+        explicitToolNamesByIndex.set(index, incomingName)
+      }
+      const explicitName = explicitToolNamesByIndex.get(index) || ''
+      const name = explicitName || inferToolName(accumulatedArgs)
+      toolNamesByIndex.set(index, name)
+
+      const incomingId = typeof chunk.id === 'string' ? chunk.id.trim() : ''
+      const id = toolIdsByIndex.get(index) || incomingId || `call_${index}_${Date.now()}`
+      toolIdsByIndex.set(index, id)
+
+      yield {
+        ...chunk,
+        id,
+        name,
+      }
+      continue
+    }
+
+    if (chunk.type === 'block-end' && chunk.block?.type === 'tool-call') {
+      const index = chunk.index ?? 0
+      const block = sanitizeToolCallBlock(chunk.block, {
+        id: toolIdsByIndex.get(index),
+        name: explicitToolNamesByIndex.get(index) || inferToolName(toolArgsByIndex.get(index)),
+        arguments: toolArgsByIndex.get(index),
+      })
+      toolIdsByIndex.set(index, block.id)
+      toolNamesByIndex.set(index, block.name)
+      yield {
+        ...chunk,
+        block,
+      }
+      continue
+    }
+
+    yield chunk
+  }
+}
+
 export function sanitizeMessagesHistory(messages: any[]): any[] {
   if (!Array.isArray(messages)) return messages
   const toolCallIds: string[] = []
@@ -133,58 +269,33 @@ export function sanitizeMessagesHistory(messages: any[]): any[] {
     let contentChanged = false
     const newContent = msg.content.map((block: any) => {
       if (block && block.type === 'tool-call') {
-        let currentName = typeof block.name === 'string' ? block.name.trim() : ''
-        let rawArgs = block.arguments
-        if (typeof rawArgs === 'string') {
-          try {
-            rawArgs = JSON.parse(rawArgs)
-          } catch {
-            rawArgs = rawArgs ? { input: rawArgs } : {}
-          }
-        }
-        if (!rawArgs || typeof rawArgs !== 'object') {
-          rawArgs = {}
-        }
-
-        let targetName = currentName
-        if (!targetName || targetName === 'tool') {
-          targetName = inferToolName(rawArgs)
-        }
-
-        let targetId = typeof block.id === 'string' ? block.id.trim() : ''
-        if (!targetId) {
-          targetId = `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-        }
-        toolCallIds.push(targetId)
-
-        let updatedArgs = { ...rawArgs }
-        if (targetName === 'bash' && (!updatedArgs.command || !String(updatedArgs.command).trim())) {
-          updatedArgs.command = 'echo "No command specified"'
-          if (!updatedArgs.description) updatedArgs.description = 'Fallback command'
-        } else if (targetName === 'read' && !updatedArgs.file_path && !updatedArgs.path) {
-          updatedArgs.file_path = '.'
-        }
-
-        const stringifiedArgs = JSON.stringify(updatedArgs) || '{}'
-
-        if (block.name !== targetName || block.id !== targetId || block.arguments !== stringifiedArgs) {
+        const sanitizedBlock = sanitizeToolCallBlock(block)
+        toolCallIds.push(sanitizedBlock.id)
+        if (
+          block.name !== sanitizedBlock.name ||
+          block.id !== sanitizedBlock.id ||
+          block.arguments !== sanitizedBlock.arguments
+        ) {
           contentChanged = true
-          return {
-            ...block,
-            id: targetId,
-            name: targetName,
-            arguments: stringifiedArgs,
-          }
+          return sanitizedBlock
         }
       } else if (block && (block.type === 'tool-result' || block.type === 'tool')) {
-        let callId = typeof block.callId === 'string' ? block.callId.trim() : (typeof block.id === 'string' ? block.id.trim() : '')
+        let callId =
+          typeof block.toolCallId === 'string' && block.toolCallId.trim()
+            ? block.toolCallId.trim()
+            : typeof block.callId === 'string' && block.callId.trim()
+              ? block.callId.trim()
+              : typeof block.id === 'string'
+                ? block.id.trim()
+                : ''
         if (!callId && toolCallIds.length > 0) {
           callId = toolCallIds[toolCallIds.length - 1]
+        }
+        if (callId && block.toolCallId !== callId) {
           contentChanged = true
           return {
             ...block,
-            callId,
-            id: callId,
+            toolCallId: callId,
           }
         }
       }

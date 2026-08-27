@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest'
+import { BlockAssembler } from '@deepseek-ai/dsh-llm'
 import { metricsCollector } from '../src/metrics.js'
-import { inferToolName, normalizeReasoningEffort, sanitizeMessagesHistory, DEFAULT_EFFORT, SUPPORTED_EFFORTS } from '../src/models.js'
+import {
+  inferToolName,
+  normalizeReasoningEffort,
+  sanitizeMessagesHistory,
+  sanitizeToolCallStream,
+  DEFAULT_EFFORT,
+  SUPPORTED_EFFORTS,
+} from '../src/models.js'
 import { Readable, Writable } from 'node:stream'
 
 describe('Stream and Prompt Result Augmentation logic', () => {
@@ -252,6 +260,95 @@ describe('Stream and Prompt Result Augmentation logic', () => {
     expect(sanitized[0].content[1].name).toBe('bash')
     const args2 = JSON.parse(sanitized[0].content[1].arguments)
     expect(args2.command).toBeDefined()
+  })
+
+  it('sanitizes the final tool-call block before BlockAssembler persists it', async () => {
+    const rawChunks = [
+      { type: 'block-start', index: 0, blockType: 'tool-call' },
+      {
+        type: 'tool-call-delta',
+        index: 0,
+        id: '',
+        name: '',
+        argumentsDelta: '{"objective":"inspect the project"}',
+      },
+      {
+        type: 'block-end',
+        index: 0,
+        block: {
+          type: 'tool-call',
+          id: '',
+          name: '',
+          arguments: '{"objective":"inspect the project"}',
+        },
+      },
+      { type: 'finish', reason: { kind: 'tool-calls' } },
+    ]
+
+    async function* rawStream() {
+      for (const chunk of rawChunks) yield chunk
+    }
+
+    const assembler = new BlockAssembler()
+    const sanitizedChunks: any[] = []
+    for await (const chunk of sanitizeToolCallStream(rawStream())) {
+      sanitizedChunks.push(chunk)
+      assembler.push(chunk as any)
+    }
+
+    const delta = sanitizedChunks.find((chunk) => chunk.type === 'tool-call-delta')
+    const block = assembler.blocks()[0] as any
+    const args = JSON.parse(block.arguments)
+
+    expect(delta.id).toBeTruthy()
+    expect(delta.name).toBe('bash')
+    expect(block.id).toBe(delta.id)
+    expect(block.name).toBe('bash')
+    expect(args.objective).toBe('inspect the project')
+    expect(args.command).toBe('echo "No command specified"')
+  })
+
+  it('repairs missing tool-result ids using the ACP toolCallId field', () => {
+    const sanitized = sanitizeMessagesHistory([
+      {
+        role: 'assistant',
+        content: [{ type: 'tool-call', id: 'call-1', name: 'read', arguments: '{"path":"README.md"}' }],
+      },
+      {
+        role: 'user',
+        content: [{ type: 'tool-result', content: [{ type: 'text', text: 'ok' }] }],
+      },
+    ])
+
+    expect(sanitized[1].content[0].toolCallId).toBe('call-1')
+  })
+
+  it('re-infers an unnamed tool while fragmented arguments accumulate', async () => {
+    async function* rawStream() {
+      yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+      yield { type: 'tool-call-delta', index: 0, id: '', argumentsDelta: '{' }
+      yield { type: 'tool-call-delta', index: 0, id: '', argumentsDelta: '"file_path":"README.md"}' }
+      yield {
+        type: 'block-end',
+        index: 0,
+        block: { type: 'tool-call', id: '', name: '', arguments: '{"file_path":"README.md"}' },
+      }
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+    }
+
+    const assembler = new BlockAssembler()
+    const deltas: any[] = []
+    for await (const chunk of sanitizeToolCallStream(rawStream())) {
+      if (chunk.type === 'tool-call-delta') deltas.push(chunk)
+      assembler.push(chunk as any)
+    }
+
+    const block = assembler.blocks()[0] as any
+    expect(deltas[0].name).toBe('bash')
+    expect(deltas[1].name).toBe('read')
+    expect(deltas[1].id).toBe(deltas[0].id)
+    expect(block.name).toBe('read')
+    expect(block.id).toBe(deltas[0].id)
   })
 
   it('correctly normalizes reasoning effort for safe API gateway execution', () => {
