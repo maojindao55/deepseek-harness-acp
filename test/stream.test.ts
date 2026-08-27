@@ -231,6 +231,25 @@ describe('Stream and Prompt Result Augmentation logic', () => {
     expect(frozenBlock.name).toBe('')
   })
 
+  it('safely populates empty arguments in tool-call blocks to prevent empty function/arguments errors', () => {
+    const emptyArgsMsg = {
+      role: 'assistant',
+      content: [
+        { type: 'tool-call', name: 'bash', arguments: '' },
+        { type: 'tool-call', name: '', arguments: '{}' },
+      ],
+    }
+    const sanitized = sanitizeMessagesHistory([emptyArgsMsg])
+    expect(sanitized).toHaveLength(1)
+    expect(sanitized[0].content[0].name).toBe('bash')
+    const args1 = JSON.parse(sanitized[0].content[0].arguments)
+    expect(args1.command).toBeDefined()
+
+    expect(sanitized[0].content[1].name).toBe('bash')
+    const args2 = JSON.parse(sanitized[0].content[1].arguments)
+    expect(args2.command).toBeDefined()
+  })
+
   it('correctly normalizes reasoning effort for safe API gateway execution', () => {
     expect(DEFAULT_EFFORT).toBe('high')
     expect(normalizeReasoningEffort('off')).toBe('off')

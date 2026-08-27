@@ -123,12 +123,37 @@ export function sanitizeMessagesHistory(messages: any[]): any[] {
     let contentChanged = false
     const newContent = msg.content.map((block: any) => {
       if (block && block.type === 'tool-call') {
-        const currentName = typeof block.name === 'string' ? block.name.trim() : ''
-        if (!currentName || currentName === 'tool') {
+        let currentName = typeof block.name === 'string' ? block.name.trim() : ''
+        let rawArgs = block.arguments
+        if (typeof rawArgs === 'string') {
+          try {
+            rawArgs = JSON.parse(rawArgs)
+          } catch {
+            rawArgs = rawArgs ? { input: rawArgs } : {}
+          }
+        }
+        if (!rawArgs || typeof rawArgs !== 'object') {
+          rawArgs = {}
+        }
+
+        let targetName = currentName
+        if (!targetName || targetName === 'tool') {
+          targetName = inferToolName(rawArgs)
+        }
+
+        if (targetName === 'bash' && (!rawArgs.command || !String(rawArgs.command).trim())) {
+          rawArgs.command = 'echo "No command specified"'
+          if (!rawArgs.description) rawArgs.description = 'Fallback command'
+        }
+
+        const stringifiedArgs = JSON.stringify(rawArgs) || '{}'
+
+        if (block.name !== targetName || block.arguments !== stringifiedArgs) {
           contentChanged = true
           return {
             ...block,
-            name: inferToolName(block.arguments),
+            name: targetName,
+            arguments: stringifiedArgs,
           }
         }
       }

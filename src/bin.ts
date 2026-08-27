@@ -814,8 +814,18 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
   })
 
   ctx.on('tools/execute', async (exec: any, next: any) => {
-    if (exec && (!exec.name || exec.name === 'tool' || (typeof exec.name === 'string' && !exec.name.trim()))) {
-      exec.name = inferToolName(exec.arguments)
+    if (exec) {
+      if (!exec.name || exec.name === 'tool' || (typeof exec.name === 'string' && !exec.name.trim())) {
+        exec.name = inferToolName(exec.arguments)
+      }
+      if (exec.name === 'bash') {
+        if (!exec.arguments || typeof exec.arguments !== 'object') {
+          exec.arguments = { command: 'echo "No command specified"', description: 'No-op fallback' }
+        } else if (!exec.arguments.command || !String(exec.arguments.command).trim()) {
+          exec.arguments.command = 'echo "No command specified"'
+          if (!exec.arguments.description) exec.arguments.description = 'No-op fallback'
+        }
+      }
     }
     return typeof next === 'function' ? next() : undefined
   })
