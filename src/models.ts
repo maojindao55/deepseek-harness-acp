@@ -126,6 +126,8 @@ export function inferToolName(rawArgs: any): string {
 
 export function sanitizeMessagesHistory(messages: any[]): any[] {
   if (!Array.isArray(messages)) return messages
+  const toolCallIds: string[] = []
+
   return messages.map((msg: any) => {
     if (!msg || !Array.isArray(msg.content)) return msg
     let contentChanged = false
@@ -151,13 +153,16 @@ export function sanitizeMessagesHistory(messages: any[]): any[] {
 
         let targetId = typeof block.id === 'string' ? block.id.trim() : ''
         if (!targetId) {
-          targetId = `call_${Date.now()}_${Math.random().toString(36).slice(2)}`
+          targetId = `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
         }
+        toolCallIds.push(targetId)
 
         let updatedArgs = { ...rawArgs }
         if (targetName === 'bash' && (!updatedArgs.command || !String(updatedArgs.command).trim())) {
           updatedArgs.command = 'echo "No command specified"'
           if (!updatedArgs.description) updatedArgs.description = 'Fallback command'
+        } else if (targetName === 'read' && !updatedArgs.file_path && !updatedArgs.path) {
+          updatedArgs.file_path = '.'
         }
 
         const stringifiedArgs = JSON.stringify(updatedArgs) || '{}'
@@ -169,6 +174,17 @@ export function sanitizeMessagesHistory(messages: any[]): any[] {
             id: targetId,
             name: targetName,
             arguments: stringifiedArgs,
+          }
+        }
+      } else if (block && (block.type === 'tool-result' || block.type === 'tool')) {
+        let callId = typeof block.callId === 'string' ? block.callId.trim() : (typeof block.id === 'string' ? block.id.trim() : '')
+        if (!callId && toolCallIds.length > 0) {
+          callId = toolCallIds[toolCallIds.length - 1]
+          contentChanged = true
+          return {
+            ...block,
+            callId,
+            id: callId,
           }
         }
       }

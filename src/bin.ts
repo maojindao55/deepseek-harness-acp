@@ -7,7 +7,7 @@
 
 import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { Readable, Writable } from 'node:stream'
 import { boot, installFailLoud, loadEnv, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
@@ -26,6 +26,29 @@ import {
 import { metricsCollector } from './metrics.js'
 import { mcpManager } from './mcp/index.js'
 
+// Automatically detect and prepend Git Bash on Windows to avoid broken WSL stubs in System32
+if (process.platform === 'win32') {
+  const localAppData = process.env.LOCALAPPDATA || ''
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files'
+  const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
+  const candidateGitDirs = [
+    join(programFiles, 'Git', 'bin'),
+    join(programFiles, 'Git', 'usr', 'bin'),
+    join(programFilesX86, 'Git', 'bin'),
+    join(programFilesX86, 'Git', 'usr', 'bin'),
+    join(localAppData, 'Programs', 'Git', 'bin'),
+    join(localAppData, 'Programs', 'Git', 'usr', 'bin'),
+  ]
+  for (const gitDir of candidateGitDirs) {
+    if (existsSync(join(gitDir, 'bash.exe'))) {
+      const currentPath = process.env.PATH || ''
+      if (!currentPath.toLowerCase().includes(gitDir.toLowerCase())) {
+        process.env.PATH = `${gitDir};${currentPath}`
+      }
+      break
+    }
+  }
+}
 
 const NAME = 'deepseek-harness-acp'
 const currentDir = dirname(fileURLToPath(import.meta.url))
@@ -325,9 +348,19 @@ async function handleSessionPrompt(msg: any) {
 
   metricsCollector.startPromptTurn(sessionId)
 
-  const content = Array.isArray(params.prompt)
-    ? params.prompt
-    : [{ type: 'text', text: String(params.prompt || '') }]
+  let promptText = ''
+  if (typeof params.prompt === 'string') {
+    promptText = params.prompt.trim()
+  } else if (Array.isArray(params.prompt)) {
+    promptText = params.prompt.map((b: any) => (b.type === 'text' ? b.text : '')).join('').trim()
+  }
+
+  // If prompt is just "重试" or "继续" on a session with history, enrich the prompt so the model is properly instructed to continue!
+  if (/^(重试|继续|retry|continue)$/i.test(promptText) || promptText === '## 本次任务\n重试' || promptText === '## 本次任务\n继续') {
+    promptText = '上一轮任务执行被中断。请根据上下文历史中的完整任务要求和当前已有进度，继续执行并完成尚未完成的工作。'
+  }
+
+  const content = [{ type: 'text', text: promptText || '继续' }]
   const message = createUserMessage(content)
 
   try {
@@ -530,6 +563,9 @@ function wrapStdoutWebStream(webStdout: any): any {
                 sse: true,
                 http: true,
               },
+            }
+            if (parsed.result.agentInfo) {
+              parsed.result.agentInfo.version = version
             }
             await writer.write(textEncoder.encode(JSON.stringify(parsed) + '\n'))
             continue
@@ -830,8 +866,15 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
       latestState?.sessionId
     const state = getSessionState(sessionId)
     const effort = normalizeReasoningEffort(state.effort)
+
+    let messages = resolved?.messages || payload?.messages
+    if (Array.isArray(messages)) {
+      messages = sanitizeMessagesHistory(messages)
+    }
+
     return {
       ...resolved,
+      ...(messages ? { messages } : {}),
       model: state.model,
       ...(effort ? { reasoningEffort: effort } : {}),
     }
@@ -860,6 +903,9 @@ await boot(NAME, configToLoad, undefined, (ctx: any) => {
   })
 
   ctx.on('llm/stream', (options: any, next: any) => {
+    if (options && Array.isArray(options.messages)) {
+      options.messages = sanitizeMessagesHistory(options.messages)
+    }
     const rawStream = typeof next === 'function' ? next() : options
     if (rawStream && typeof rawStream[Symbol.asyncIterator] === 'function') {
       async function* sanitizeStream(innerStream: AsyncIterable<any>) {
