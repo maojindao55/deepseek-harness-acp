@@ -9,13 +9,12 @@ export const DEFAULT_MODEL =
   process.env.DEEPSEEK_MODEL ||
   process.env.DSH_MODEL ||
   process.env.MODEL ||
-  'deepseek-v4-pro'
+  'deepseek-flash'
 export const DEFAULT_EFFORT = 'high'
 
 export const SUPPORTED_MODELS: ModelOption[] = [
-  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', contextWindow: 1_000_000 },
-  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', contextWindow: 1_000_000 },
-  { id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision Exp', contextWindow: 1_000_000 },
+  { id: 'deepseek-flash', name: 'DeepSeek V41 Flash', contextWindow: 1_000_000, description: 'Latest generation flash model with vision support and in-history system prompt updates.' },
+  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', contextWindow: 1_000_000, description: 'Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost.' },
 ]
 
 export function formatModelDisplayName(id: string): string {
@@ -45,12 +44,13 @@ export const SUPPORTED_EFFORTS = [
   { id: 'max', name: 'Max' },
 ]
 
-export function normalizeReasoningEffort(effort?: string): 'off' | 'low' | 'high' | undefined {
+export function normalizeReasoningEffort(effort?: string): 'off' | 'low' | 'high' | 'max' | undefined {
   if (!effort) return undefined
   const val = effort.trim().toLowerCase()
   if (val === 'off' || val === 'none' || val === 'disabled' || val === 'false') return 'off'
   if (val === 'low') return 'low'
-  if (val === 'medium' || val === 'high' || val === 'max' || val === 'xhigh') return 'high'
+  if (val === 'max' || val === 'xhigh') return 'max'
+  if (val === 'medium' || val === 'high') return 'high'
   return 'high'
 }
 

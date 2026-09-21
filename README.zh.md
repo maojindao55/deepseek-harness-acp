@@ -17,7 +17,7 @@
 - **🧠 思考链 / 深度思考流**：实时查看模型推理思考过程（`agent_thought_chunk`）。
 - **📊 完整用量与性能指标**：`session/prompt` 响应返回标准 `usage`（输入/输出/Cache命中/思考Token）与 `_meta.metrics`（轮步数、TTFT首字延迟、tok/s生成速度、缓存命中率）。
 - **🛠️ 工具执行生命周期**：完整的工具调用中与完成状态更新（`tool_call` & `tool_call_update`）。
-- **🧩 MCP (Model Context Protocol) 扩展**：支持 Stdio / SSE 外部 MCP 服务，自动发现项目 `.mcp.json` / `.cursor/mcp.json` / `.vscode/mcp.json` 与 ACP 会话参数，无缝扩充 Agent 工具生态。
+- **🧩 MCP (Model Context Protocol) 扩展**：支持 Stdio / Streamable HTTP 外部 MCP 服务，自动发现项目 `.mcp.json` / `.cursor/mcp.json` / `.vscode/mcp.json` 与 ACP 会话参数，无缝扩充 Agent 工具生态。Harness 0.1.6 不支持旧版 SSE 传输。
 - **🔄 跨进程会话恢复与列表**：支持多轮对话接续与历史会话读取（`session/load`、`session/resume`、`session/list`）。
 
 - **⚙️ 动态配置项**：支持客户端动态切换模型（`deepseek-v4-pro` / `deepseek-v4-flash`）。
@@ -28,6 +28,8 @@
 ## 🚀 快速开始
 
 ### 1. 全局安装（CLI）
+
+需要 Node.js 24 或更高版本，使用 DeepSeek Harness `0.1.6-alpha.2`。
 
 ```bash
 # 全局安装（支持全称或短别名）
@@ -49,6 +51,8 @@ npx deepseek-harness-acp
 export DEEPSEEK_API_KEY="sk-your-api-key"
 # 可选环境变量：
 export DEEPSEEK_BASE_URL="https://api.deepseek.com"
+export DEEPSEEK_PROTOCOL="messages" # messages（默认）| chat-completions
+export DEEPSEEK_MODEL="deepseek-v4-pro"
 export DSH_PERMISSION_MODE="workspace-write" # workspace-write | danger-full-access
 ```
 
@@ -142,8 +146,9 @@ await client.prompt({
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-fetch"]
     },
-    "remote-sse": {
-      "url": "http://localhost:8080/sse"
+    "remote-http": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp"
     }
   }
 }

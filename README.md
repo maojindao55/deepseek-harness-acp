@@ -17,7 +17,7 @@
 - **🧠 Thought Trace Streaming**: Live reasoning and thinking flow (`agent_thought_chunk`).
 - **📊 Comprehensive Token & Performance Metrics**: Standard `usage` (input/output/cached/thought tokens) and detailed `_meta.metrics` (TTFT, tok/s, cache hit rate, turns, steps) in `session/prompt` response.
 - **🛠️ Tool Lifecycle Updates**: Observable tool execution states (`tool_call` & `tool_call_update`).
-- **🧩 MCP (Model Context Protocol) Support**: Connect to external Stdio / SSE MCP servers, auto-discovering project `.mcp.json` / `.cursor/mcp.json` / `.vscode/mcp.json` and ACP session parameters to seamlessly expand the agent's tool ecosystem.
+- **🧩 MCP (Model Context Protocol) Support**: Connect to external Stdio / Streamable HTTP MCP servers, auto-discovering project `.mcp.json` / `.cursor/mcp.json` / `.vscode/mcp.json` and ACP session parameters to seamlessly expand the agent's tool ecosystem. Legacy SSE transport is unsupported by Harness 0.1.6.
 - **🔄 Session Recovery & Listing**: Seamless multi-turn session resume (`session/load`, `session/resume`, `session/list`).
 
 - **⚙️ Dynamic Configuration**: Real-time model switching (`deepseek-v4-pro` / `deepseek-v4-flash`).
@@ -28,6 +28,8 @@
 ## 🚀 Quick Start
 
 ### 1. Global Installation (CLI)
+
+Requires Node.js 24 or later. Uses DeepSeek Harness `0.1.6-alpha.2`.
 
 ```bash
 # Install globally via npm (using full name or short alias)
@@ -49,6 +51,8 @@ Create a `.env` file or export environment variables:
 export DEEPSEEK_API_KEY="sk-your-api-key"
 # Optional overrides:
 export DEEPSEEK_BASE_URL="https://api.deepseek.com"
+export DEEPSEEK_PROTOCOL="messages" # messages (default) | chat-completions
+export DEEPSEEK_MODEL="deepseek-v4-pro"
 export DSH_PERMISSION_MODE="workspace-write" # workspace-write | danger-full-access
 ```
 
@@ -142,8 +146,9 @@ Create a `.mcp.json` (or `.cursor/mcp.json` / `.vscode/mcp.json`) in your projec
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-fetch"]
     },
-    "remote-sse": {
-      "url": "http://localhost:8080/sse"
+    "remote-http": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp"
     }
   }
 }

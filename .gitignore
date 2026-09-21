@@ -6,4 +6,7 @@ lib/
 .DS_Store
 dist/
 coverage/
+.upgrade-backup-*/
+.agents/
 package-lock.json
+

@@ -252,6 +252,10 @@ export class MetricsCollector {
   public finishPromptTurn(sessionId: string) {
     return this.getTracker(sessionId).finishPromptTurn()
   }
+
+  public release(sessionId: string) {
+    this.trackers.delete(sessionId)
+  }
 }
 
 export const metricsCollector = new MetricsCollector()

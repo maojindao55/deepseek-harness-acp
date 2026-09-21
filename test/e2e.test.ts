@@ -1,156 +1,162 @@
 import { describe, it, expect } from 'vitest'
-import { spawn } from 'node:child_process'
-import { resolve } from 'node:path'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { resolve, join } from 'node:path'
+import { createServer } from 'node:http'
+import { once } from 'node:events'
+import { pathToFileURL } from 'node:url'
 
-describe('End-to-End ACP Server Process Test', () => {
-  it('starts server, initializes, creates session and receives config options', async () => {
-    const binPath = resolve(__dirname, '../src/bin.ts')
-    const isWin = process.platform === 'win32'
-    const child = spawn(isWin ? 'npx.cmd' : 'npx', ['tsx', binPath], {
-      cwd: resolve(__dirname, '..'),
-      env: {
-        ...process.env,
-        DSH_PERMISSION_MODE: 'danger-full-access',
-      },
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: isWin,
-    })
+function client(env: Record<string, string>) {
+  const child = spawn(process.execPath, ['lib/bin.js'], {
+    cwd: resolve(__dirname, '..'), env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'],
+  }) as ChildProcessWithoutNullStreams
+  let buffer = '', errors = '', id = 0
+  const messages: any[] = []
+  child.stderr.on('data', (chunk) => { errors += chunk.toString() })
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk.toString()
+    const lines = buffer.split('\n')
+    buffer = lines.pop()!
+    for (const line of lines) if (line.trim()) messages.push(JSON.parse(line))
+  })
+  async function wait(predicate: (message: any) => boolean, timeout = 30000): Promise<any> {
+    const until = Date.now() + timeout
+    while (Date.now() < until) {
+      const found = messages.find(predicate)
+      if (found) return found
+      if (child.exitCode !== null) throw new Error('ACP exited: ' + errors)
+      await new Promise((r) => setTimeout(r, 15))
+    }
+    throw new Error('ACP timed out: ' + errors)
+  }
+  function request(method: string, params: any) {
+    const requestId = ++id
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: requestId, method, params }) + '\n')
+    return wait((m) => m.id === requestId)
+  }
+  return { messages, request, wait, child, async close() {
+    if (child.exitCode !== null) return
+    const exited = once(child, 'exit')
+    child.stdin.end()
+    const timer = setTimeout(() => child.kill(), 10000)
+    await exited
+    clearTimeout(timer)
+  } }
+}
 
-    const messages: any[] = []
-
-    child.stdout.on('data', (chunk) => {
-      const text = chunk.toString()
-      const lines = text.split('\n').map((l: string) => l.trim()).filter(Boolean)
-      for (const line of lines) {
-        try {
-          messages.push(JSON.parse(line))
-        } catch {}
+describe('Harness 0.1.6 ACP process', () => {
+  it('streams once, switches models, cancels, closes, lists and restores across processes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-acp-test-'))
+    const clients: ReturnType<typeof client>[] = []
+    const bodies: any[] = []
+    const server = createServer(async (req, res) => {
+      let body = ''
+      for await (const chunk of req) body += chunk
+      if (!body) { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ data: [] })); return }
+      const parsed = JSON.parse(body); bodies.push(parsed)
+      const slow = JSON.stringify(parsed.messages).includes('SLOW')
+      const useTool = JSON.stringify(parsed.messages).includes('USE_TOOL')
+        && !parsed.messages.some((m: any) => Array.isArray(m.content) && m.content.some((c: any) => c.type === 'tool_result'))
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      const emit = (type: string, data: any) => res.write('event: ' + type + '\ndata: ' + JSON.stringify({ type, ...data }) + '\n\n')
+      emit('message_start', { message: { id: 'msg_test', type: 'message', role: 'assistant', model: parsed.model, content: [],
+        usage: { input_tokens: 10, output_tokens: 0 } } })
+      emit('content_block_start', { index: 0, content_block: { type: 'thinking', thinking: '' } })
+      emit('content_block_delta', { index: 0, delta: { type: 'thinking_delta', thinking: 'Thinking.' } })
+      emit('content_block_stop', { index: 0 })
+      if (useTool) {
+        emit('content_block_start', { index: 1, content_block: { type: 'tool_use', id: 'call_test', name: 'mcp__mock__echo_message', input: {} } })
+        emit('content_block_delta', { index: 1, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ text: 'MCP works' }) } })
+        emit('content_block_stop', { index: 1 })
+        emit('message_delta', { delta: { stop_reason: 'tool_use', stop_sequence: null }, usage: { output_tokens: 5 } })
+        emit('message_stop', {})
+        res.end()
+        return
       }
+      emit('content_block_start', { index: 1, content_block: { type: 'text', text: '' } })
+      emit('content_block_delta', { index: 1, delta: { type: 'text_delta', text: 'Hello ' } })
+      const timer = setTimeout(() => {
+        emit('content_block_delta', { index: 1, delta: { type: 'text_delta', text: 'world.' } })
+        emit('content_block_stop', { index: 1 })
+        emit('message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 5 } })
+        emit('message_stop', {})
+        res.end()
+      }, slow ? 15000 : 80)
+      res.on('close', () => clearTimeout(timer))
     })
-
-    const waitForMessage = (id: number, timeout = 8000) =>
-      new Promise<any>((resolve, reject) => {
-        const start = Date.now()
-        const check = () => {
-          const hit = messages.find((m) => m.id === id)
-          if (hit) return resolve(hit)
-          if (Date.now() - start > timeout) return reject(new Error(`Timeout waiting for message id=${id}`))
-          setTimeout(check, 50)
-        }
-        check()
-      })
-
-    // 1. Send initialize
-    const initMsg = JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: {
-        protocolVersion: 1,
-        clientCapabilities: {},
-      },
-    }) + '\n'
-    child.stdin.write(initMsg)
-
-    const initRes = await waitForMessage(1)
-    expect(initRes).toBeDefined()
-    expect(initRes.result.protocolVersion).toBe(1)
-    expect(initRes.result.agentCapabilities.sessionCapabilities.resume).toBe(true)
-    expect(initRes.result.agentCapabilities.loadSession).toBe(true)
-
-    // 2. Send session/new
-    const newSessionMsg = JSON.stringify({
-      jsonrpc: '2.0',
-      id: 2,
-      method: 'session/new',
-      params: {
-        cwd: process.cwd(),
-        mcpServers: [],
-      },
-    }) + '\n'
-    child.stdin.write(newSessionMsg)
-
-    const sessionRes = await waitForMessage(2)
-    expect(sessionRes).toBeDefined()
-    expect(sessionRes.result.sessionId).toBeDefined()
-    // Verify configOptions are augmented by our server wrapper
-    expect(sessionRes.result.configOptions).toBeDefined()
-    expect(sessionRes.result.configOptions.length).toBeGreaterThan(0)
-
-    // 3. Send session/set_config_option
-    const setConfigMsg = JSON.stringify({
-      jsonrpc: '2.0',
-      id: 3,
-      method: 'session/set_config_option',
-      params: {
-        sessionId: sessionRes.result.sessionId,
-        configId: 'model',
-        value: 'deepseek-v4-flash',
-      },
-    }) + '\n'
-    child.stdin.write(setConfigMsg)
-
-    const configRes = await waitForMessage(3)
-    expect(configRes).toBeDefined()
-    const modelOpt = configRes.result.configOptions.find((o: any) => o.id === 'model')
-    expect(modelOpt.currentValue).toBe('deepseek-v4-flash')
-
-    // 4. Send session/resume with a specific sessionId
-    const resumeSessionId = 'e2e-resumed-session-' + Date.now()
-    const resumeMsg = JSON.stringify({
-      jsonrpc: '2.0',
-      id: 4,
-      method: 'session/resume',
-      params: {
-        sessionId: resumeSessionId,
-        cwd: process.cwd(),
-      },
-    }) + '\n'
-    child.stdin.write(resumeMsg)
-    await waitForMessage(4)
-
-    // 5. Send session/list
-    const listMsg = JSON.stringify({
-      jsonrpc: '2.0',
-      id: 5,
-      method: 'session/list',
-      params: {
-        cwd: process.cwd(),
-      },
-    }) + '\n'
-    child.stdin.write(listMsg)
-
-    const listRes = await waitForMessage(5)
-    expect(listRes).toBeDefined()
-    expect(Array.isArray(listRes.result.sessions)).toBe(true)
-    expect(listRes.result.sessions.some((s: any) => s.sessionId === resumeSessionId)).toBe(true)
-
-    // 6. Send session/load with MCP servers
-    const loadSessionId = 'e2e-loaded-session-' + Date.now()
-    const mockServerScript = resolve(__dirname, 'fixtures/mock-mcp-server.ts')
-    const loadMsg = JSON.stringify({
-      jsonrpc: '2.0',
-      id: 6,
-      method: 'session/load',
-      params: {
-        sessionId: loadSessionId,
-        cwd: process.cwd(),
-        mcpServers: [
-          {
-            name: 'mock-load-server',
-            command: 'npx',
-            args: ['tsx', mockServerScript],
-            prefix: 'mcp_load_',
-          },
-        ],
-      },
-    }) + '\n'
-    child.stdin.write(loadMsg)
-
-    const loadRes = await waitForMessage(6)
-    expect(loadRes).toBeDefined()
-    expect(loadRes.result.sessionId).toBe(loadSessionId)
-
-    child.kill('SIGTERM')
-  }, 20000)
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+    const port = (server.address() as any).port
+    const env = {
+      DSH_HOME: join(root, 'home'), DSH_SESSIONS_ROOT: join(root, 'sessions'),
+      DEEPSEEK_API_KEY: 'test-not-a-real-key', DEEPSEEK_BASE_URL: 'http://127.0.0.1:' + port,
+      DEEPSEEK_PROTOCOL: 'messages', DSH_TELEMETRY_DISABLED: '1',
+      DSH_PERMISSION_MODE: 'workspace-write',
+    }
+    try {
+      const first = client(env); clients.push(first)
+      const init = await first.request('initialize', { protocolVersion: 1, clientCapabilities: {} })
+      expect(init.result.agentCapabilities.sessionCapabilities.close).toEqual({})
+      expect(init.result.agentCapabilities.loadSession).toBe(true)
+      const created = await first.request('session/new', { cwd: root, mcpServers: [] })
+      expect(created.error).toBeUndefined()
+      const sessionId = created.result.sessionId
+      const config = await first.request('session/set_config_option', { sessionId, configId: 'effort', value: 'max' })
+      expect(config.error).toBeUndefined()
+      expect(config.result.configOptions.find((o: any) => o.id === 'reasoning_effort').currentValue).toBe('max')
+      const switched = await first.request('session/set_config_option', { sessionId, configId: 'model', value: 'deepseek-flash' })
+      expect(switched.error).toBeUndefined()
+      const prompted = await first.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: 'Say hello' }] })
+      expect(prompted.error).toBeUndefined()
+      expect(prompted.result.stopReason).toBe('end_turn')
+      const updates = first.messages.filter((m) => m.method === 'session/update').map((m) => m.params.update)
+      expect(updates.filter((u) => u.sessionUpdate === 'agent_message_chunk').map((u) => u.content.text).join('')).toBe('Hello world.')
+      expect(updates.filter((u) => u.sessionUpdate === 'agent_thought_chunk').map((u) => u.content.text).join('')).toBe('Thinking.')
+      expect(prompted.result.usage.outputTokens).toBeGreaterThan(0)
+      expect(prompted.result._meta.metrics.steps).toBe(1)
+      expect(bodies[0].model).toBe('deepseek-flash')
+      const other = await first.request('session/new', { cwd: root, mcpServers: [{
+        name: 'mock', command: process.execPath,
+        args: ['--import', pathToFileURL(resolve(__dirname, '../node_modules/tsx/dist/loader.mjs')).href,
+          resolve(__dirname, 'fixtures/mock-mcp-server.ts')], env: [],
+      }] })
+      expect(other.error).toBeUndefined()
+      const otherId = other.result.sessionId
+      const parallel = await Promise.all([
+        first.request('session/prompt', { sessionId: otherId, prompt: [{ type: 'text', text: 'USE_TOOL' }] }),
+        first.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: 'Another hello' }] }),
+      ])
+      expect(parallel.every((r) => r.result?.stopReason === 'end_turn')).toBe(true)
+      const toolUpdates = first.messages.filter((m) => m.params?.sessionId === otherId && m.params?.update?.toolCallId === 'call_test')
+      expect(toolUpdates.map((m) => m.params.update.sessionUpdate)).toEqual(['tool_call', 'tool_call_update'])
+      expect(toolUpdates[1].params.update.status).toBe('completed')
+      const requestsWithTool = bodies.filter((b) => JSON.stringify(b.messages).includes('USE_TOOL'))
+      expect(requestsWithTool[0].tools.some((t: any) => t.name === 'mcp__mock__echo_message')).toBe(true)
+      expect(bodies.filter((b) => !JSON.stringify(b.messages).includes('USE_TOOL'))
+        .every((b) => !b.tools.some((t: any) => t.name === 'mcp__mock__echo_message'))).toBe(true)
+      await first.request('session/close', { sessionId: otherId })
+      await first.request('session/close', { sessionId })
+      await first.close()
+      const second = client(env); clients.push(second)
+      await second.request('initialize', { protocolVersion: 1, clientCapabilities: {} })
+      const listed = await second.request('session/list', { cwd: root })
+      expect(listed.result.sessions.some((s: any) => s.sessionId === sessionId)).toBe(true)
+      const invalid = await second.request('session/resume', { sessionId: 'missing', cwd: root, mcpServers: [] })
+      expect(invalid.error).toBeDefined()
+      const loaded = await second.request('session/load', { sessionId, cwd: root, mcpServers: [] })
+      expect(loaded.error).toBeUndefined()
+      expect(second.messages.some((m) => m.params?.update?.sessionUpdate === 'user_message_chunk')).toBe(true)
+      const slowPrompt = second.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: 'SLOW' }] })
+      await second.wait((m) => m.params?.update?.content?.text === 'Hello ')
+      second.child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId } }) + '\n')
+      const cancelled = await slowPrompt
+      expect(cancelled.result.stopReason).toBe('cancelled')
+      await second.request('session/close', { sessionId })
+    } finally {
+      await Promise.all(clients.map((c) => c.close()))
+      server.closeAllConnections()
+      await new Promise<void>((r) => server.close(() => r()))
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 90000)
 })
