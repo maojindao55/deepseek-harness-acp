@@ -41,7 +41,7 @@ export function createBridge(ctx: Context, version: string, transport: Stream = 
   const notify = (sessionId: string, update: Message) => send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId, update } })
   const key = (sessionId: string, id: string) => JSON.stringify([sessionId, id])
 
-  ctx.on('agent/assistant-stream', ({ agent, frame }) => {
+  ;(ctx as any).on('agent/assistant-stream', ({ agent, frame }: any) => {
     const sessionId = agent.session.id
     if (!owned.has(sessionId)) return
     if (frame.type === 'start') {

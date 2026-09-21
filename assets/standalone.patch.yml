@@ -3,7 +3,7 @@
     apiKeyEnv: !!js "process.env.DEEPSEEK_API_KEY_ENV ?? 'DEEPSEEK_API_KEY'"
     protocol: !!js "process.env.DEEPSEEK_PROTOCOL ?? 'messages'"
     baseURL: !!js "process.env.DEEPSEEK_BASE_URL ?? undefined"
-    models: !!js "process.env.DEEPSEEK_MODELS_JSON ? JSON.parse(process.env.DEEPSEEK_MODELS_JSON) : undefined"
+    models: !!js "(() => { const defaultCatalog = [{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', contextWindow: 1000000, inputModalities: ['text', 'image'] }, { id: 'deepseek-flash', name: 'DeepSeek Flash', contextWindow: 1000000, inputModalities: ['text', 'image'] }, { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', contextWindow: 1000000, inputModalities: ['text', 'image'] }, { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', contextWindow: 1000000, inputModalities: ['text'] }, { id: 'deepseek-chat', name: 'DeepSeek Chat', contextWindow: 1000000, inputModalities: ['text'] }, { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', contextWindow: 1000000, inputModalities: ['text'] }]; if (process.env.DEEPSEEK_MODELS_JSON) { try { const parsed = JSON.parse(process.env.DEEPSEEK_MODELS_JSON); if (Array.isArray(parsed) && parsed.length > 0) { return parsed.map((m) => { const id = m.id?.toLowerCase() || ''; const isVision = id.includes('v4.1') || id.includes('vision') || (id.includes('flash') && !id.includes('v4-flash-pro')); if (isVision && (!m.inputModalities || !m.inputModalities.includes('image'))) { return { ...m, inputModalities: ['text', 'image'] }; } return m; }); } } catch {} } return defaultCatalog; })()"
     thinking: enabled
     reasoningEffort: max
 - id: system-prompt
@@ -13,6 +13,7 @@
 - id: session-persistence-jsonl
   config:
     root: !!js "process.env.DSH_SESSIONS_ROOT ?? './.sessions'"
+    compression: !!js "process.env.DSH_PERSISTENCE_COMPRESSION ?? 'none'"
 - id: session-title-llm
   disabled: true
 - id: hmr

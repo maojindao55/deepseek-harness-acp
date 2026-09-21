@@ -13,7 +13,8 @@ export const DEFAULT_MODEL =
 export const DEFAULT_EFFORT = 'high'
 
 export const SUPPORTED_MODELS: ModelOption[] = [
-  { id: 'deepseek-flash', name: 'DeepSeek V41 Flash', contextWindow: 1_000_000, description: 'Latest generation flash model with vision support and in-history system prompt updates.' },
+  { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', contextWindow: 1_000_000, description: 'Latest generation flash model with vision support and in-history system prompt updates.' },
+  { id: 'deepseek-flash', name: 'DeepSeek Flash', contextWindow: 1_000_000, description: 'Latest generation flash model with vision support and in-history system prompt updates.' },
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', contextWindow: 1_000_000, description: 'Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost.' },
 ]
 
