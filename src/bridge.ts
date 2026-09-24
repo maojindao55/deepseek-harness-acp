@@ -6,6 +6,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-query'
 import { MetricsCollector } from './metrics.js'
 import { sessionMcpServers } from './mcp/config.js'
+import { DEFAULT_MODEL } from './models.js'
 
 type Message = any // JSON-RPC boundary; the official SDK validates protocol payloads.
 type Delivered = { text: string; reasoning: string }
@@ -135,8 +136,18 @@ export function createBridge(ctx: Context, version: string, transport: Stream = 
                 }
                 if (message.method === 'session/set_config_option') {
                   if (params.configId === 'effort') params.configId = 'reasoning_effort'
-                  if (params.configId === 'model' && typeof params.value === 'string' && !params.value.startsWith('[')) {
-                    params.value = JSON.stringify(['deepseek-official', params.value])
+                  if (params.configId === 'model' && typeof params.value === 'string') {
+                    if (!params.value.startsWith('[')) {
+                      const m = params.value === 'auto' ? DEFAULT_MODEL : params.value
+                      params.value = JSON.stringify(['deepseek-official', m])
+                    } else {
+                      try {
+                        const parsed = JSON.parse(params.value)
+                        if (Array.isArray(parsed) && parsed[1] === 'auto') {
+                          params.value = JSON.stringify([parsed[0] || 'deepseek-official', DEFAULT_MODEL])
+                        }
+                      } catch {}
+                    }
                   }
                 }
                 if (message.method === 'session/prompt' && busy.has(params.sessionId)) throw new Error('A prompt is already running in this session')
@@ -194,6 +205,9 @@ export function createBridge(ctx: Context, version: string, transport: Stream = 
         if (message.result?.agentCapabilities) {
           message.result.agentInfo = { ...message.result.agentInfo, name: 'deepseek-harness-acp', version }
           message.result.agentCapabilities.loadSession = true
+          if (message.result.agentCapabilities.promptCapabilities) {
+            message.result.agentCapabilities.promptCapabilities.image = true
+          }
         }
         const update = message.params?.update
         if (message.method === 'session/update' && update?.messageId) {

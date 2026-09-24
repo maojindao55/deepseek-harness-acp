@@ -42,7 +42,8 @@ A custom --config supplies the complete Harness core; this executable mounts ACP
       apply(acpCtx) {
         bridge = createBridge(acpCtx, version)
         Acp.apply(acpCtx, {
-          provider: 'deepseek-official', model: process.env.DEEPSEEK_MODEL ?? process.env.DSH_MODEL ?? DEFAULT_MODEL,
+          provider: 'deepseek-official',
+          model: DEFAULT_MODEL,
           stream: bridge.stream,
         })
       },

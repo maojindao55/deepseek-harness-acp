@@ -5,16 +5,22 @@ export interface ModelOption {
   description?: string
 }
 
+function cleanModel(m?: string): string | undefined {
+  if (!m) return undefined
+  const trimmed = m.trim()
+  if (!trimmed || trimmed.toLowerCase() === 'auto') return undefined
+  return trimmed
+}
+
 export const DEFAULT_MODEL =
-  process.env.DEEPSEEK_MODEL ||
-  process.env.DSH_MODEL ||
-  process.env.MODEL ||
+  cleanModel(process.env.DEEPSEEK_MODEL) ||
+  cleanModel(process.env.DSH_MODEL) ||
+  cleanModel(process.env.MODEL) ||
   'deepseek-flash'
 export const DEFAULT_EFFORT = 'high'
 
 export const SUPPORTED_MODELS: ModelOption[] = [
-  { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', contextWindow: 1_000_000, description: 'Latest generation flash model with vision support and in-history system prompt updates.' },
-  { id: 'deepseek-flash', name: 'DeepSeek Flash', contextWindow: 1_000_000, description: 'Latest generation flash model with vision support and in-history system prompt updates.' },
+  { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', contextWindow: 1_000_000, description: 'Latest generation flash model with vision support and in-history system prompt updates.' },
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', contextWindow: 1_000_000, description: 'Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost.' },
 ]
 
@@ -28,12 +34,13 @@ export function formatModelDisplayName(id: string): string {
 
 export function getEffectiveSupportedModels(currentModel?: string, baseModels?: ModelOption[]): ModelOption[] {
   const models = [...(baseModels && baseModels.length > 0 ? baseModels : SUPPORTED_MODELS)]
-  const envModel = process.env.DEEPSEEK_MODEL || process.env.DSH_MODEL || process.env.MODEL
+  const envModel = cleanModel(process.env.DEEPSEEK_MODEL || process.env.DSH_MODEL || process.env.MODEL)
   if (envModel && !models.some((m) => m.id === envModel)) {
     models.unshift({ id: envModel, name: formatModelDisplayName(envModel), contextWindow: 1_000_000 })
   }
-  if (currentModel && !models.some((m) => m.id === currentModel)) {
-    models.unshift({ id: currentModel, name: formatModelDisplayName(currentModel), contextWindow: 1_000_000 })
+  const cleanCurrent = cleanModel(currentModel)
+  if (cleanCurrent && !models.some((m) => m.id === cleanCurrent)) {
+    models.unshift({ id: cleanCurrent, name: formatModelDisplayName(cleanCurrent), contextWindow: 1_000_000 })
   }
   return models
 }
