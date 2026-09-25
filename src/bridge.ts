@@ -208,6 +208,20 @@ export function createBridge(ctx: Context, version: string, transport: Stream = 
           if (message.result.agentCapabilities.promptCapabilities) {
             message.result.agentCapabilities.promptCapabilities.image = true
           }
+          message.result.authMethods = [
+            {
+              id: 'deepseek-api-key',
+              name: 'DeepSeek API key',
+              description: 'Set DEEPSEEK_API_KEY in the environment, or run `dsh-acp --setup` once to store the key in ~/.dsh/.env. Create one at https://platform.deepseek.com/api_keys',
+            },
+            {
+              type: 'terminal',
+              id: 'deepseek-setup',
+              name: 'Interactive setup',
+              description: 'Prompt for your DeepSeek API key in a terminal and store it in ~/.dsh/.env',
+              args: ['--setup'],
+            },
+          ]
         }
         const update = message.params?.update
         if (message.method === 'session/update' && update?.messageId) {

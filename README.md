@@ -56,6 +56,13 @@ export DEEPSEEK_MODEL="deepseek-v4-pro"
 export DSH_PERMISSION_MODE="workspace-write" # workspace-write | danger-full-access
 ```
 
+Alternatively, run the interactive setup once to store your key in `~/.dsh/.env`
+(`$DSH_HOME` is respected); it is loaded automatically on every start:
+
+```bash
+dsh-acp --setup
+```
+
 ---
 
 ## 🔌 Integration with Third-Party Clients
