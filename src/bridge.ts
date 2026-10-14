@@ -32,6 +32,10 @@ export function createBridge(ctx: Context, version: string, transport: Stream = 
   const busy = new Set<string>()
   const attempts = new Map<string, Delivered>()
   const committed = new Map<string, Delivered>()
+  // The step a session is currently streaming. Chunk frames don't carry turn/step, so usage chunks are tagged with
+  // the step from the start frame; the durable assistant/message for the same step then overwrites it instead of
+  // being counted a second time.
+  const streaming = new Map<string, { turn?: number; step?: number }>()
   let output = Promise.resolve()
   let resolveClosed!: () => void
   const closed = new Promise<void>((resolve) => { resolveClosed = resolve })
@@ -47,10 +51,11 @@ export function createBridge(ctx: Context, version: string, transport: Stream = 
     if (!owned.has(sessionId)) return
     if (frame.type === 'start') {
       attempts.set(sessionId, { text: '', reasoning: '' })
+      streaming.set(sessionId, { turn: frame.turn, step: frame.step })
       metrics.recordEvent(sessionId, { type: 'step/start', data: { turn: frame.turn, step: frame.step } })
     } else if (frame.type === 'chunk') {
       const chunk = frame.chunk
-      metrics.recordEvent(sessionId, { type: 'assistant/chunk', data: { chunk } })
+      metrics.recordEvent(sessionId, { type: 'assistant/chunk', data: { ...streaming.get(sessionId), chunk } })
       if (chunk.type !== 'text-delta' && chunk.type !== 'reasoning-delta') return
       const delivered = attempts.get(sessionId)
       if (!delivered) return
@@ -63,6 +68,7 @@ export function createBridge(ctx: Context, version: string, transport: Stream = 
     } else {
       metrics.recordEvent(sessionId, { type: 'step/end' })
       attempts.delete(sessionId)
+      streaming.delete(sessionId)
     }
   })
   ctx.on('session/event', (session, event) => {

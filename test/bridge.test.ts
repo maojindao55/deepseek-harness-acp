@@ -59,4 +59,44 @@ describe('stream transport', () => {
     controller.close()
     await bridge.closed
   })
+
+  it('counts a step\'s usage once when it arrives both as a stream chunk and on the durable message', async () => {
+    const handlers = new Map<string, Function>()
+    const ctx = {
+      sessionQuery: {}, get: () => undefined,
+      on: (name: string, callback: Function) => handlers.set(name, callback),
+    } as unknown as Context
+    let controller!: ReadableStreamDefaultController<any>
+    const outgoing: any[] = []
+    const transport: Stream = {
+      readable: new ReadableStream({ start(c) { controller = c } }),
+      writable: new WritableStream({ write(message) { outgoing.push(message) } }),
+    }
+    const bridge = createBridge(ctx, 'test', transport)
+    const input = bridge.stream.readable.getReader()
+    const output = bridge.stream.writable.getWriter()
+    controller.enqueue({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: process.cwd(), mcpServers: [] } })
+    await input.read()
+    await output.write({ jsonrpc: '2.0', id: 1, result: { sessionId: 's' } } as any)
+    controller.enqueue({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 's', prompt: [] } })
+    await input.read()
+
+    const usage = { inputTokens: 126, outputTokens: 654, cacheReadTokens: 22784, cacheWriteTokens: 0, reasoningTokens: 0 }
+    const emit = (frame: any) => handlers.get('agent/assistant-stream')!({ agent: { session: { id: 's' } }, frame })
+    emit({ type: 'start', attemptId: 'x1', revision: 1, turn: 1, step: 1 })
+    emit({ type: 'chunk', chunk: { type: 'text-delta', text: 'ok' } })
+    emit({ type: 'chunk', chunk: { type: 'usage', usage } })
+    handlers.get('session/event')!({ id: 's' }, { type: 'assistant/message', data: { turn: 1, step: 1, message: { id: 'm1' }, usage } })
+    emit({ type: 'end' })
+    await output.write({ jsonrpc: '2.0', id: 2, result: { stopReason: 'end_turn' } } as any)
+
+    expect(outgoing.find((m) => m.id === 2)?.result.usage).toMatchObject({
+      inputTokens: 126 + 22784,
+      outputTokens: 654,
+      cachedReadTokens: 22784,
+      totalTokens: 126 + 22784 + 654,
+    })
+    controller.close()
+    await bridge.closed
+  })
 })
